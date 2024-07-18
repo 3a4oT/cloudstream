@@ -61,7 +61,7 @@ android {
         targetSdk = 33 /* Android 14 is Fu*ked
         ^ https://developer.android.com/about/versions/14/behavior-changes-14#safer-dynamic-code-loading*/
         versionCode = 63
-        versionName = "4.3.2"
+        versionName = "4.3.333"
 
         resValue("string", "app_version", "${defaultConfig.versionName}${versionNameSuffix ?: ""}")
         resValue("string", "commit_hash", "git rev-parse --short HEAD".execute() ?: "")
@@ -290,7 +290,7 @@ tasks.withType<DokkaTask>().configureEach {
                 localDirectory.set(file("src/main/java"))
 
                 // URL showing where the source code can be accessed through the web browser
-                remoteUrl.set(URL("https://github.com/recloudstream/cloudstream/tree/master/app/src/main/java"))
+                remoteUrl.set(URL("https://github.com/3a4oT/cloudstream/tree/master/app/src/main/java"))
 
                 // Suffix which is used to append the line number to the URL. Use #L for GitHub
                 remoteLineSuffix.set("#L")
