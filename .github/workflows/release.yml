@@ -1,0 +1,69 @@
+name: Build and Release
+
+on:
+  push:
+    tags:
+      - '*'
+
+env:
+  VERSIONED_NAME: cloudstream-bania-${{ github.ref_name }}
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+        with:
+          api-level: 35
+          build-tools: 35.0.0
+
+      - name: Add build-tools to PATH
+        run: echo "$ANDROID_HOME/build-tools/35.0.0" >> $GITHUB_PATH
+
+      - name: Decode and save keystore
+        env:
+          BASE64_KEYSTORE: ${{ secrets.BASE64_KEYSTORE }}
+        run: |
+          echo $BASE64_KEYSTORE | base64 --decode > my-release-key.jks
+
+      - name: Grant execute permission for gradlew
+        run: chmod +x gradlew
+
+      - name: Build APK and AAB
+        run: |
+            ./gradlew assemblePrerelease build androidSourcesJar
+            ./gradlew makeJar # for classes.jar, has to be done after assemblePrerelease
+
+      - name: Rename APK and AAB
+        run: |
+          mv app/build/outputs/apk/release/app-release-unsigned.apk app/build/outputs/apk/release/${{ env.VERSIONED_NAME }}.apk
+
+      - name: Align APK
+        run: zipalign -v 4 app/build/outputs/apk/prerelease/release/${{ env.VERSIONED_NAME }}.apk app/build/outputs/apk/prerelease/release/${{ env.VERSIONED_NAME }}-aligned.apk
+
+      - name: Sign APK and AAB
+        env:
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+        run: |
+          apksigner sign --ks my-release-key.jks --ks-key-alias $KEY_ALIAS --ks-pass pass:$KEYSTORE_PASSWORD --key-pass pass:$KEY_PASSWORD --v2-signing-enabled true app/build/outputs/prerelease/apk/release/${{ env.VERSIONED_NAME }}-aligned.apk
+
+      - name: Install GitHub CLI
+        run: sudo apt-get install gh
+
+      - name: Create Release and upload APK and AAB
+        run: |
+          echo "${{ secrets.GITHUB_TOKEN }}" | gh auth login --with-token
+          gh release create ${{ github.ref }} app/build/outputs/apk/prerelease/release/${{ env.VERSIONED_NAME }}-aligned.apk app/build/outputs/bundle/prerelease/release/${{ env.VERSIONED_NAME }}.aab --title "Release ${{ github.ref_name }}" --notes "Автоматичний реліз додатку AndroidTV для перегляду фільмів з українською озвучкою в бані :) через мережу інтернет"
