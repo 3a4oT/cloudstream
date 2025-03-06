@@ -3,12 +3,19 @@ package com.lagradost.cloudstream3.ui
 import android.os.Bundle
 import android.util.Log
 import android.view.Menu
-import android.view.View.*
-import android.widget.*
+import android.view.View.GONE
+import android.view.View.INVISIBLE
+import android.view.View.VISIBLE
+import android.widget.AbsListView
+import android.widget.ArrayAdapter
+import android.widget.ImageView
+import android.widget.LinearLayout
+import android.widget.ListView
 import androidx.appcompat.app.AlertDialog
 import com.fasterxml.jackson.databind.DeserializationFeature
 import com.fasterxml.jackson.databind.json.JsonMapper
 import com.fasterxml.jackson.module.kotlin.kotlinModule
+import com.google.android.gms.cast.MediaLoadOptions
 import com.google.android.gms.cast.MediaQueueItem
 import com.google.android.gms.cast.MediaSeekOptions
 import com.google.android.gms.cast.MediaStatus.REPEAT_MODE_REPEAT_OFF
@@ -24,7 +31,7 @@ import com.lagradost.cloudstream3.mvvm.Resource
 import com.lagradost.cloudstream3.mvvm.logError
 import com.lagradost.cloudstream3.mvvm.safeApiCall
 import com.lagradost.cloudstream3.sortUrls
-import com.lagradost.cloudstream3.ui.player.LoadType
+import com.lagradost.cloudstream3.ui.player.LOADTYPE_CHROMECAST
 import com.lagradost.cloudstream3.ui.player.RepoLinkGenerator
 import com.lagradost.cloudstream3.ui.player.SubtitleData
 import com.lagradost.cloudstream3.ui.result.ResultEpisode
@@ -233,12 +240,22 @@ class SelectSourceController(val view: ImageView, val activity: ControllerActivi
                                         loadMirror(index + 1)
                                     }
                                 } else {
-                                    awaitLinks(remoteMediaClient?.load(mediaItem, true, startAt)) {
+                                    val mediaLoadOptions =
+                                        MediaLoadOptions.Builder()
+                                            .setPlayPosition(startAt)
+                                            .setAutoplay(true)
+                                            .build()
+                                    awaitLinks(remoteMediaClient?.load(mediaItem, mediaLoadOptions)) {
                                         loadMirror(index + 1)
                                     }
                                 }
                             } catch (e: Exception) {
-                                awaitLinks(remoteMediaClient?.load(mediaItem, true, startAt)) {
+                                val mediaLoadOptions =
+                                    MediaLoadOptions.Builder()
+                                        .setPlayPosition(startAt)
+                                        .setAutoplay(true)
+                                        .build()
+                                awaitLinks(remoteMediaClient?.load(mediaItem, mediaLoadOptions)) {
                                     loadMirror(index + 1)
                                 }
                             }
@@ -262,6 +279,7 @@ class SelectSourceController(val view: ImageView, val activity: ControllerActivi
     }
 
     var isLoadingMore = false
+
 
     override fun onMediaStatusUpdated() {
         super.onMediaStatusUpdated()
@@ -296,14 +314,16 @@ class SelectSourceController(val view: ImageView, val activity: ControllerActivi
 
                         val isSuccessful = safeApiCall {
                             generator.generateLinks(
-                                clearCache = false, type = LoadType.Chromecast,
+                                clearCache = false,
+                                allowedTypes = LOADTYPE_CHROMECAST,
                                 callback = {
                                     it.first?.let { link ->
                                         currentLinks.add(link)
                                     }
                                 }, subtitleCallback = {
                                     currentSubs.add(it)
-                                })
+                                },
+                                isCasting = true)
                         }
 
                         val sortedLinks = sortUrls(currentLinks)

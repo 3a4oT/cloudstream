@@ -51,6 +51,7 @@ data class ResultEpisode(
     /** Sum of all previous season episode counts + episode */
     val totalEpisodeIndex: Int? = null,
     val airDate: Long? = null,
+    val runTime: Int? = null,
 )
 
 fun ResultEpisode.getRealPosition(): Long {
@@ -87,6 +88,7 @@ fun buildResultEpisode(
     parentId: Int,
     totalEpisodeIndex: Int? = null,
     airDate: Long? = null,
+    runTime: Int? = null,
 ): ResultEpisode {
     val posDur = getViewPos(id)
     val videoWatchState = getVideoWatchState(id) ?: VideoWatchState.None
@@ -111,6 +113,7 @@ fun buildResultEpisode(
         videoWatchState,
         totalEpisodeIndex,
         airDate,
+        runTime,
     )
 }
 
@@ -121,6 +124,7 @@ fun ResultEpisode.getWatchProgress(): Float {
 
 object ResultFragment {
     private const val URL_BUNDLE = "url"
+    private const val NAME_BUNDLE = "name"
     private const val API_NAME_BUNDLE = "apiName"
     private const val SEASON_BUNDLE = "season"
     private const val EPISODE_BUNDLE = "episode"
@@ -134,6 +138,7 @@ object ResultFragment {
         return Bundle().apply {
             putString(URL_BUNDLE, card.url)
             putString(API_NAME_BUNDLE, card.apiName)
+            putString(NAME_BUNDLE, card.name)
             if (card is DataStoreHelper.ResumeWatchingResult) {
                 if (card.season != null)
                     putInt(SEASON_BUNDLE, card.season)
@@ -152,12 +157,14 @@ object ResultFragment {
     fun newInstance(
         url: String,
         apiName: String,
+        name : String,
         startAction: Int = 0,
         startValue: Int = 0
     ): Bundle {
         return Bundle().apply {
             putString(URL_BUNDLE, url)
             putString(API_NAME_BUNDLE, apiName)
+            putString(NAME_BUNDLE, name)
             putInt(START_ACTION_BUNDLE, startAction)
             putInt(START_VALUE_BUNDLE, startValue)
             putBoolean(RESTART_BUNDLE, true)
@@ -215,6 +222,7 @@ object ResultFragment {
     data class StoredData(
         val url: String,
         val apiName: String,
+        val name : String,
         val showFillers: Boolean,
         val dubStatus: DubStatus,
         val start: AutoResume?,
@@ -227,6 +235,7 @@ object ResultFragment {
         val settingsManager = PreferenceManager.getDefaultSharedPreferences(context)
         val url = arguments?.getString(URL_BUNDLE) ?: return null
         val apiName = arguments?.getString(API_NAME_BUNDLE) ?: return null
+        val name = arguments?.getString(NAME_BUNDLE) ?: return null
         val showFillers =
             settingsManager.getBoolean(context.getString(R.string.show_fillers_key), false)
         val dubStatus = if (context.getApiDubstatusSettings()
@@ -255,7 +264,7 @@ object ResultFragment {
                 season = resumeSeason
             )
         }
-        return StoredData(url, apiName, showFillers, dubStatus, start, playerAction, restart)
+        return StoredData(url, apiName, name, showFillers, dubStatus, start, playerAction, restart)
     }
 
     /*private fun reloadViewModel(forceReload: Boolean) {

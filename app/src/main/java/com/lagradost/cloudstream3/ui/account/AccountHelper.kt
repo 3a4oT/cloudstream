@@ -3,7 +3,7 @@ package com.lagradost.cloudstream3.ui.account
 import android.app.Activity
 import android.content.Context
 import android.content.DialogInterface
-import android.content.Intent
+import android.os.Bundle
 import android.text.Editable
 import android.view.LayoutInflater
 import android.view.inputmethod.EditorInfo
@@ -25,12 +25,13 @@ import com.lagradost.cloudstream3.databinding.AccountSelectLinearBinding
 import com.lagradost.cloudstream3.databinding.LockPinDialogBinding
 import com.lagradost.cloudstream3.mvvm.logError
 import com.lagradost.cloudstream3.mvvm.observe
-import com.lagradost.cloudstream3.ui.result.setImage
 import com.lagradost.cloudstream3.ui.result.setLinearListLayout
 import com.lagradost.cloudstream3.utils.AppContextUtils.setDefaultFocus
 import com.lagradost.cloudstream3.utils.DataStoreHelper
 import com.lagradost.cloudstream3.utils.DataStoreHelper.getDefaultAccount
+import com.lagradost.cloudstream3.utils.ImageLoader.loadImage
 import com.lagradost.cloudstream3.utils.UIHelper.dismissSafe
+import com.lagradost.cloudstream3.utils.UIHelper.navigate
 import com.lagradost.cloudstream3.utils.UIHelper.showInputMethod
 
 object AccountHelper {
@@ -90,12 +91,12 @@ object AccountHelper {
         }
 
         // Handle the profile picture and its interactions
-        binding.accountImage.setImage(account.image)
+        binding.accountImage.loadImage(account.image)
         binding.accountImage.setOnClickListener {
             // Roll the image forwards once
             currentEditAccount =
                 currentEditAccount.copy(defaultImageIndex = (currentEditAccount.defaultImageIndex + 1) % DataStoreHelper.profileImages.size)
-            binding.accountImage.setImage(currentEditAccount.image)
+            binding.accountImage.loadImage(currentEditAccount.image)
         }
 
         // Handle applying changes
@@ -217,7 +218,7 @@ object AccountHelper {
                 val activity = context.getActivity()
                 if (activity is AccountSelectActivity) {
                     isPinValid = true
-                    activity.viewModel.handleAccountSelect(getDefaultAccount(context), activity)
+                    activity.accountViewModel.handleAccountSelect(getDefaultAccount(context), activity)
                 }
             }
         }
@@ -307,9 +308,10 @@ object AccountHelper {
         builder.show()
 
         binding.manageAccountsButton.setOnClickListener {
-            val accountSelectIntent = Intent(activity, AccountSelectActivity::class.java)
-            accountSelectIntent.putExtra("isEditingFromMainActivity", true)
-            activity.startActivity(accountSelectIntent)
+            activity.navigate(
+                R.id.accountSelectActivity,
+                Bundle().apply { putBoolean("isEditingFromMainActivity", true) }
+            )
             builder.dismissSafe()
         }
 

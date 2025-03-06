@@ -1,5 +1,6 @@
 package com.lagradost.cloudstream3.utils
 
+import android.annotation.SuppressLint
 import android.app.PendingIntent
 import android.content.BroadcastReceiver
 import android.content.Context
@@ -8,15 +9,16 @@ import android.content.IntentFilter
 import android.content.IntentSender
 import android.content.pm.PackageInstaller
 import android.os.Build
+import android.util.Log
 import android.widget.Toast
+import com.lagradost.cloudstream3.AcraApplication.Companion.context
 import com.lagradost.cloudstream3.R
 import com.lagradost.cloudstream3.mvvm.logError
-import com.lagradost.cloudstream3.mvvm.normalSafeApiCall
+import com.lagradost.cloudstream3.services.PackageInstallerService
 import com.lagradost.cloudstream3.utils.Coroutines.main
 import java.io.InputStream
 
 const val INSTALL_ACTION = "ApkInstaller.INSTALL_ACTION"
-
 
 class ApkInstaller(private val service: PackageInstallerService) {
 
@@ -25,6 +27,8 @@ class ApkInstaller(private val service: PackageInstallerService) {
          * Used for postponed installations
          **/
         var delayedInstaller: DelayedInstaller? = null
+        private var isReceiverRegistered = false
+        private const val TAG = "ApkInstaller"
     }
 
     inner class DelayedInstaller(
@@ -36,6 +40,7 @@ class ApkInstaller(private val service: PackageInstallerService) {
                 session.commit(intent)
                 true
             } catch (e: Exception) {
+                logError(e)
                 false
             }.also { delayedInstaller = null }
         }
@@ -51,13 +56,14 @@ class ApkInstaller(private val service: PackageInstallerService) {
     }
 
     private val installActionReceiver = object : BroadcastReceiver() {
+        @SuppressLint("UnsafeIntentLaunch")
         override fun onReceive(context: Context, intent: Intent) {
             when (intent.getIntExtra(
                 PackageInstaller.EXTRA_STATUS,
                 PackageInstaller.STATUS_FAILURE
             )) {
                 PackageInstaller.STATUS_PENDING_USER_ACTION -> {
-                    val userAction = intent.getParcelableExtra<Intent>(Intent.EXTRA_INTENT)
+                    val userAction = intent.getSafeParcelableExtra<Intent>(Intent.EXTRA_INTENT)
                     userAction?.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                     context.startActivity(userAction)
                 }
@@ -104,12 +110,20 @@ class ApkInstaller(private val service: PackageInstallerService) {
                     inputStream.close()
                 }
 
+            // We must create an explicit intent or it will fail on Android 15+
+            val installIntent = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) { 
+                Intent(service, PackageInstallerService::class.java)
+                    .setAction(INSTALL_ACTION) 
+            } else Intent(INSTALL_ACTION) 
+
+            val installFlags = when {
+                Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE -> PendingIntent.FLAG_MUTABLE
+                Build.VERSION.SDK_INT >= Build.VERSION_CODES.S -> PendingIntent.FLAG_IMMUTABLE
+                else -> 0
+            }
 
             val intentSender = PendingIntent.getBroadcast(
-                service,
-                activeSession,
-                Intent(INSTALL_ACTION),
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) PendingIntent.FLAG_MUTABLE else 0,
+                service, activeSession, installIntent, installFlags
             ).intentSender
 
             // Use delayed installations on android 13 and only if "allow from unknown sources" is enabled
@@ -141,8 +155,30 @@ class ApkInstaller(private val service: PackageInstallerService) {
     }
 
     init {
-        service.registerReceiver(installActionReceiver, IntentFilter(INSTALL_ACTION))
-        service.receivers.add(installActionReceiver)
+        // Might be dangerous
+        registerInstallActionReceiver()
+    }
+
+    private fun registerInstallActionReceiver() {
+        if (!isReceiverRegistered) {
+            val intentFilter = IntentFilter().apply {
+                addAction(INSTALL_ACTION)
+            }
+            Log.d(TAG, "Registering install action event receiver")
+            context?.registerBroadcastReceiver(installActionReceiver, intentFilter)
+            isReceiverRegistered = true
+        }
+    }
+
+    fun unregisterInstallActionReceiver() {
+        if (isReceiverRegistered) {
+            Log.d(TAG, "Unregistering install action event receiver")
+            try {
+                context?.unregisterReceiver(installActionReceiver)
+            } catch (e: Exception) {
+                logError(e)
+            }
+            isReceiverRegistered = false
+        }
     }
 }
-

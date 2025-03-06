@@ -1,26 +1,42 @@
 package com.lagradost.cloudstream3.plugins
 
-import android.app.*
+import android.Manifest
+import android.app.Activity
+import android.app.Notification
+import android.app.NotificationChannel
+import android.app.NotificationManager
 import android.content.Context
+import android.content.pm.PackageManager
 import android.content.res.AssetManager
 import android.content.res.Resources
 import android.os.Build
 import android.os.Environment
 import android.util.Log
 import android.widget.Toast
+import androidx.core.app.ActivityCompat
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import androidx.fragment.app.FragmentActivity
 import com.fasterxml.jackson.annotation.JsonProperty
-import com.google.gson.Gson
-import com.lagradost.cloudstream3.*
+import com.lagradost.cloudstream3.APIHolder
 import com.lagradost.cloudstream3.APIHolder.removePluginMapping
 import com.lagradost.cloudstream3.AcraApplication.Companion.getActivity
 import com.lagradost.cloudstream3.AcraApplication.Companion.getKey
+import com.lagradost.cloudstream3.AcraApplication.Companion.removeKey
 import com.lagradost.cloudstream3.AcraApplication.Companion.setKey
+import com.lagradost.cloudstream3.AllLanguagesName
+import com.lagradost.cloudstream3.AutoDownloadMode
 import com.lagradost.cloudstream3.CommonActivity.showToast
+import com.lagradost.cloudstream3.MainAPI
 import com.lagradost.cloudstream3.MainAPI.Companion.settingsForProvider
 import com.lagradost.cloudstream3.MainActivity.Companion.afterPluginsLoadedEvent
+import com.lagradost.cloudstream3.PROVIDER_STATUS_DOWN
+import com.lagradost.cloudstream3.PROVIDER_STATUS_OK
+import com.lagradost.cloudstream3.R
+import com.lagradost.cloudstream3.TvType
+import com.lagradost.cloudstream3.actions.VideoClickAction
+import com.lagradost.cloudstream3.actions.VideoClickActionHolder
+import com.lagradost.cloudstream3.apmap
 import com.lagradost.cloudstream3.mvvm.debugPrint
 import com.lagradost.cloudstream3.mvvm.logError
 import com.lagradost.cloudstream3.mvvm.normalSafeApiCall
@@ -28,22 +44,22 @@ import com.lagradost.cloudstream3.plugins.RepositoryManager.ONLINE_PLUGINS_FOLDE
 import com.lagradost.cloudstream3.plugins.RepositoryManager.PREBUILT_REPOSITORIES
 import com.lagradost.cloudstream3.plugins.RepositoryManager.downloadPluginToFile
 import com.lagradost.cloudstream3.plugins.RepositoryManager.getRepoPlugins
-import com.lagradost.cloudstream3.ui.result.UiText
-import com.lagradost.cloudstream3.ui.result.txt
 import com.lagradost.cloudstream3.ui.settings.extensions.REPOSITORIES_KEY
 import com.lagradost.cloudstream3.ui.settings.extensions.RepositoryData
 import com.lagradost.cloudstream3.utils.AppContextUtils.getApiProviderLangSettings
+import com.lagradost.cloudstream3.utils.AppUtils.parseJson
 import com.lagradost.cloudstream3.utils.Coroutines.main
 import com.lagradost.cloudstream3.utils.ExtractorApi
 import com.lagradost.cloudstream3.utils.UIHelper.colorFromAttribute
+import com.lagradost.cloudstream3.utils.UiText
 import com.lagradost.cloudstream3.utils.VideoDownloadManager.sanitizeFilename
 import com.lagradost.cloudstream3.utils.extractorApis
+import com.lagradost.cloudstream3.utils.txt
 import dalvik.system.PathClassLoader
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import java.io.File
 import java.io.InputStreamReader
-import java.util.*
 
 // Different keys for local and not since local can be removed at any time without app knowing, hence the local are getting rebuilt on every app start
 const val PLUGINS_KEY = "PLUGINS_KEY"
@@ -163,25 +179,24 @@ object PluginManager {
 
     private val LOCAL_PLUGINS_PATH = CLOUD_STREAM_FOLDER + "plugins"
 
-    public var currentlyLoading: String? = null
+    var currentlyLoading: String? = null
 
     // Maps filepath to plugin
-    val plugins: MutableMap<String, Plugin> =
-        LinkedHashMap<String, Plugin>()
+    val plugins: MutableMap<String, BasePlugin> =
+        LinkedHashMap<String, BasePlugin>()
 
     // Maps urls to plugin
-    val urlPlugins: MutableMap<String, Plugin> =
-        LinkedHashMap<String, Plugin>()
+    val urlPlugins: MutableMap<String, BasePlugin> =
+        LinkedHashMap<String, BasePlugin>()
 
-    private val classLoaders: MutableMap<PathClassLoader, Plugin> =
-        HashMap<PathClassLoader, Plugin>()
+    private val classLoaders: MutableMap<PathClassLoader, BasePlugin> =
+        HashMap<PathClassLoader, BasePlugin>()
 
     var loadedLocalPlugins = false
         private set
 
     var loadedOnlinePlugins = false
         private set
-    private val gson = Gson()
 
     private suspend fun maybeLoadPlugin(context: Context, file: File) {
         val name = file.name
@@ -291,6 +306,9 @@ object PluginManager {
         main {
             val uitext = txt(R.string.plugins_updated, updatedPlugins.size)
             createNotification(activity, uitext, updatedPlugins)
+            /*val navBadge = (activity as MainActivity).binding?.navRailView?.getOrCreateBadge(R.id.navigation_settings)
+            navBadge?.isVisible = true
+            navBadge?.number = 5*/
         }
 
         // ioSafe {
@@ -339,7 +357,7 @@ object PluginManager {
 
             //Omit non-NSFW if mode is set to NSFW only
             if (mode == AutoDownloadMode.NsfwOnly) {
-                if (tvtypes.contains(TvType.NSFW.name) == false) {
+                if (!tvtypes.contains(TvType.NSFW.name)) {
                     return@mapNotNull null
                 }
             }
@@ -440,10 +458,44 @@ object PluginManager {
         val sortedPlugins = dir.listFiles()
         // Always sort plugins alphabetically for reproducible results
 
-        Log.d(TAG, "Files in '${LOCAL_PLUGINS_PATH}' folder: $sortedPlugins")
+        Log.d(TAG, "Files in '${LOCAL_PLUGINS_PATH}' folder: ${sortedPlugins?.size}")
+
+        // Use app-specific external files directory and copy the file there.
+        // We have to do this because on Android 14+, it otherwise gives SecurityException
+        // due to dex files and setReadOnly seems to have no effect unless it it here.
+        val pluginDirectory = File(context.getExternalFilesDir(null), "plugins")
+        if (!pluginDirectory.exists()) {
+            pluginDirectory.mkdirs() // Ensure the plugins directory exists
+        }
+
+        // Make sure all local plugins are fully refreshed.
+        removeKey(PLUGINS_KEY_LOCAL)
 
         sortedPlugins?.sortedBy { it.name }?.apmap { file ->
-            maybeLoadPlugin(context, file)
+            try {
+                val destinationFile = File(pluginDirectory, file.name)
+
+                // Only copy the file if the destination file doesn't exist or if it
+                // has been modified (check file length and modification time).
+                if (!destinationFile.exists() ||
+                    destinationFile.length() != file.length() ||
+                    destinationFile.lastModified() != file.lastModified()) {
+
+                    // Copy the file to the app-specific plugin directory
+                    file.copyTo(destinationFile, overwrite = true)
+
+                    // After copying, set the destination file's modification time
+                    // to match the source file. We do this for performance so that we
+                    // can check the modification time and not make redundant writes.
+                    destinationFile.setLastModified(file.lastModified())
+                }
+
+                // Load the plugin after it has been copied
+                maybeLoadPlugin(context, destinationFile)
+            } catch (t: Throwable) {
+                Log.e(TAG, "Failed to copy the file")
+                logError(t)
+            }
         }
 
         loadedLocalPlugins = true
@@ -475,26 +527,26 @@ object PluginManager {
         Log.i(TAG, "Loading plugin: $data")
 
         return try {
-            // in case of android 14 then
+            // In case of Android 14+ then
             try {
-                File(filePath).setReadOnly()
+                // Set the file as read-only and log if it fails
+                if (!file.setReadOnly()) {
+                    Log.e(TAG, "Failed to set read-only on plugin file: ${file.name}")
+                }
             } catch (t: Throwable) {
-                Log.e(TAG, "Failed to set dex as readonly")
+                Log.e(TAG, "Failed to set dex as read-only")
                 logError(t)
             }
 
             val loader = PathClassLoader(filePath, context.classLoader)
-            var manifest: Plugin.Manifest
+            var manifest: BasePlugin.Manifest
             loader.getResourceAsStream("manifest.json").use { stream ->
                 if (stream == null) {
                     Log.e(TAG, "Failed to load plugin  $fileName: No manifest found")
                     return false
                 }
                 InputStreamReader(stream).use { reader ->
-                    manifest = gson.fromJson(
-                        reader,
-                        Plugin.Manifest::class.java
-                    )
+                    manifest = parseJson(reader, BasePlugin.Manifest::class.java)
                 }
             }
 
@@ -504,10 +556,12 @@ object PluginManager {
             val version: Int = manifest.version ?: PLUGIN_VERSION_NOT_SET.also {
                 Log.d(TAG, "No manifest version for ${data.internalName}")
             }
+
+            @Suppress("UNCHECKED_CAST")
             val pluginClass: Class<*> =
-                loader.loadClass(manifest.pluginClassName) as Class<out Plugin?>
-            val pluginInstance: Plugin =
-                pluginClass.newInstance() as Plugin
+                loader.loadClass(manifest.pluginClassName) as Class<out BasePlugin?>
+            val pluginInstance: BasePlugin =
+                pluginClass.getDeclaredConstructor().newInstance() as BasePlugin
 
             // Sets with the proper version
             setPluginData(data.copy(version = version))
@@ -517,15 +571,17 @@ object PluginManager {
                 return true
             }
 
-            pluginInstance.__filename = file.absolutePath
+            pluginInstance.filename = file.absolutePath
             if (manifest.requiresResources) {
                 Log.d(TAG, "Loading resources for ${data.internalName}")
                 // based on https://stackoverflow.com/questions/7483568/dynamic-resource-loading-from-other-apk
-                val assets = AssetManager::class.java.newInstance()
+                val assets = AssetManager::class.java.getDeclaredConstructor().newInstance()
                 val addAssetPath =
                     AssetManager::class.java.getMethod("addAssetPath", String::class.java)
                 addAssetPath.invoke(assets, file.absolutePath)
-                pluginInstance.resources = Resources(
+
+                @Suppress("DEPRECATION")
+                (pluginInstance as? Plugin)?.resources = Resources(
                     assets,
                     context.resources.displayMetrics,
                     context.resources.configuration
@@ -534,14 +590,18 @@ object PluginManager {
             plugins[filePath] = pluginInstance
             classLoaders[loader] = pluginInstance
             urlPlugins[data.url ?: filePath] = pluginInstance
-            pluginInstance.load(context)
+            if (pluginInstance is Plugin) {
+                pluginInstance.load(context)
+            } else {
+                pluginInstance.load()
+            }
             Log.i(TAG, "Loaded plugin ${data.internalName} successfully")
             currentlyLoading = null
             true
         } catch (e: Throwable) {
             Log.e(TAG, "Failed to load $file: ${Log.getStackTraceString(e)}")
             showToast(
-                context.getActivity(),
+                // context.getActivity(), // we are not always on the main thread
                 context.getString(R.string.plugin_load_fail).format(fileName),
                 Toast.LENGTH_LONG
             )
@@ -566,14 +626,19 @@ object PluginManager {
 
         // remove all registered apis
         synchronized(APIHolder.apis) {
-            APIHolder.apis.filter { api -> api.sourcePlugin == plugin.__filename }.forEach {
+            APIHolder.apis.filter { api -> api.sourcePlugin == plugin.filename }.forEach {
                 removePluginMapping(it)
             }
         }
         synchronized(APIHolder.allProviders) {
-            APIHolder.allProviders.removeIf { provider: MainAPI -> provider.sourcePlugin == plugin.__filename }
+            APIHolder.allProviders.removeIf { provider: MainAPI -> provider.sourcePlugin == plugin.filename }
         }
-        extractorApis.removeIf { provider: ExtractorApi -> provider.sourcePlugin == plugin.__filename }
+
+        extractorApis.removeIf { provider: ExtractorApi -> provider.sourcePlugin == plugin.filename }
+
+        synchronized(VideoClickActionHolder.allVideoClickActions) {
+            VideoClickActionHolder.allVideoClickActions.removeIf { action: VideoClickAction -> action.sourcePlugin == plugin.filename }
+        }
 
         classLoaders.values.removeIf { v -> v == plugin }
 
@@ -669,6 +734,60 @@ object PluginManager {
         }
     }
 
+    fun manuallyReloadAndUpdatePlugins(activity: Activity) {
+        showToast(activity.getString(R.string.starting_plugin_update_manually), Toast.LENGTH_LONG)
+
+        loadAllOnlinePlugins(activity)
+        afterPluginsLoadedEvent.invoke(false)
+
+        val urls = (getKey<Array<RepositoryData>>(REPOSITORIES_KEY) ?: emptyArray()) + PREBUILT_REPOSITORIES
+        val onlinePlugins = urls.toList().apmap {
+            getRepoPlugins(it.url)?.toList() ?: emptyList()
+        }.flatten().distinctBy { it.second.url }
+
+        val allPlugins = getPluginsOnline().flatMap { savedData ->
+            onlinePlugins
+                .filter { it.second.internalName == savedData.internalName }
+                .mapNotNull { onlineData ->
+                    OnlinePluginData(savedData, onlineData).takeIf { it.validOnlineData(activity) }
+                }
+        }.distinctBy { it.onlineData.second.url }
+
+        val updatedPlugins = mutableListOf<String>()
+
+        allPlugins.apmap { pluginData ->
+            if (pluginData.isDisabled) {
+                Log.e("PluginManager", "Unloading disabled plugin: ${pluginData.onlineData.second.name}")
+                unloadPlugin(pluginData.savedData.filePath)
+            } else {
+                val existingFile = File(pluginData.savedData.filePath)
+                if (existingFile.exists()) existingFile.delete()
+
+                if (downloadPlugin(activity, pluginData.onlineData.second.url, pluginData.savedData.internalName, existingFile, true)) {
+                    updatedPlugins.add(pluginData.onlineData.second.name)
+                }
+            }
+        }.also {
+            main {
+                val message = if (updatedPlugins.isNotEmpty()) {
+                    activity.getString(R.string.plugins_updated_manually, updatedPlugins.size)
+                } else {
+                    activity.getString(R.string.no_plugins_updated_manually)
+                }
+                showToast(message, Toast.LENGTH_LONG)
+
+                val notificationText = UiText.StringResource(R.string.plugins_updated_manually, listOf(updatedPlugins.size))
+                createNotification(activity, notificationText, updatedPlugins)
+
+            }
+        }
+
+        loadedOnlinePlugins = true
+        afterPluginsLoadedEvent.invoke(false)
+
+        Log.i("PluginManager", "Plugin update done!")
+    }
+
     private fun Context.createNotificationChannel() {
         hasCreatedNotChanel = true
         // Create the NotificationChannel, but only on API 26+ because
@@ -720,9 +839,14 @@ object PluginManager {
             }
 
             val notification = builder.build()
-            with(NotificationManagerCompat.from(context)) {
-                // notificationId is a unique int for each notification that you must define
-                notify((System.currentTimeMillis() / 1000).toInt(), notification)
+            // notificationId is a unique int for each notification that you must define
+            if (ActivityCompat.checkSelfPermission(
+                    context,
+                    Manifest.permission.POST_NOTIFICATIONS
+                ) == PackageManager.PERMISSION_GRANTED
+            ) {
+                NotificationManagerCompat.from(context)
+                    .notify((System.currentTimeMillis() / 1000).toInt(), notification)
             }
             return notification
         } catch (e: Exception) {

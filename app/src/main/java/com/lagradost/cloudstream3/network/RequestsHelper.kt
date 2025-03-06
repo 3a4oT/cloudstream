@@ -15,11 +15,16 @@ import org.conscrypt.Conscrypt
 import java.io.File
 import java.security.Security
 
-fun Requests.initClient(context: Context): OkHttpClient {
+fun Requests.initClient(context: Context) {
+    this.baseClient = buildDefaultClient(context)
+}
+
+fun buildDefaultClient(context: Context): OkHttpClient {
     normalSafeApiCall { Security.insertProviderAt(Conscrypt.newProvider(), 1) }
+    
     val settingsManager = PreferenceManager.getDefaultSharedPreferences(context)
     val dns = settingsManager.getInt(context.getString(R.string.dns_pref), 0)
-    baseClient = OkHttpClient.Builder()
+    val baseClient = OkHttpClient.Builder()
         .followRedirects(true)
         .followSslRedirects(true)
         .ignoreAllSSLErrors()
@@ -38,6 +43,8 @@ fun Requests.initClient(context: Context): OkHttpClient {
                 4 -> addAdGuardDns()
                 5 -> addDNSWatchDns()
                 6 -> addQuad9Dns()
+                7 -> addDnsSbDns()
+                8 -> addCanadianShieldDns()
             }
         }
         // Needs to be build as otherwise the other builders will change this object

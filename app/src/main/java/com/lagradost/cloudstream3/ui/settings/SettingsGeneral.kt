@@ -1,13 +1,11 @@
 package com.lagradost.cloudstream3.ui.settings
 
 import android.content.Context
-import android.content.Intent
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.view.View
 import android.widget.Toast
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AlertDialog
 import androidx.preference.PreferenceFragmentCompat
 import androidx.preference.PreferenceManager
@@ -26,17 +24,15 @@ import com.lagradost.cloudstream3.databinding.AddSiteInputBinding
 import com.lagradost.cloudstream3.mvvm.logError
 import com.lagradost.cloudstream3.mvvm.normalSafeApiCall
 import com.lagradost.cloudstream3.network.initClient
-import com.lagradost.cloudstream3.ui.EasterEggMonke
 import com.lagradost.cloudstream3.ui.settings.Globals.EMULATOR
-import com.lagradost.cloudstream3.ui.settings.Globals.PHONE
 import com.lagradost.cloudstream3.ui.settings.Globals.TV
 import com.lagradost.cloudstream3.ui.settings.Globals.beneneCount
-import com.lagradost.cloudstream3.ui.settings.Globals.isLayout
 import com.lagradost.cloudstream3.ui.settings.SettingsFragment.Companion.getPref
 import com.lagradost.cloudstream3.ui.settings.SettingsFragment.Companion.hideOn
 import com.lagradost.cloudstream3.ui.settings.SettingsFragment.Companion.setPaddingBottom
 import com.lagradost.cloudstream3.ui.settings.SettingsFragment.Companion.setToolBarScrollFlags
 import com.lagradost.cloudstream3.ui.settings.SettingsFragment.Companion.setUpToolbar
+import com.lagradost.cloudstream3.ui.settings.utils.getChooseFolderLauncher
 import com.lagradost.cloudstream3.utils.BatteryOptimizationChecker.isAppRestricted
 import com.lagradost.cloudstream3.utils.BatteryOptimizationChecker.showBatteryOptimizationDialog
 import com.lagradost.cloudstream3.utils.SingleSelectionHelper.showBottomDialog
@@ -45,10 +41,10 @@ import com.lagradost.cloudstream3.utils.SingleSelectionHelper.showMultiDialog
 import com.lagradost.cloudstream3.utils.SubtitleHelper
 import com.lagradost.cloudstream3.utils.UIHelper.dismissSafe
 import com.lagradost.cloudstream3.utils.UIHelper.hideKeyboard
+import com.lagradost.cloudstream3.utils.UIHelper.navigate
 import com.lagradost.cloudstream3.utils.USER_PROVIDER_API
 import com.lagradost.cloudstream3.utils.VideoDownloadManager
 import com.lagradost.cloudstream3.utils.VideoDownloadManager.getBasePath
-import com.lagradost.safefile.SafeFile
 
 // Change local language settings in the app.
 fun getCurrentLocale(context: Context): String {
@@ -93,34 +89,15 @@ class SettingsGeneral : PreferenceFragmentCompat() {
         val lang: String,
     )
 
-    // Open file picker
-    private val pathPicker =
-        registerForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
-            // It lies, it can be null if file manager quits.
-            if (uri == null) return@registerForActivityResult
-            val context = context ?: AcraApplication.context ?: return@registerForActivityResult
-            // RW perms for the path
-            val flags = Intent.FLAG_GRANT_READ_URI_PERMISSION or
-                    Intent.FLAG_GRANT_WRITE_URI_PERMISSION
-
-            context.contentResolver.takePersistableUriPermission(uri, flags)
-
-            val file = SafeFile.fromUri(context, uri)
-            val filePath = file?.filePath()
-            println("Selected URI path: $uri - Full path: $filePath")
-
-            // Stores the real URI using download_path_key
-            // Important that the URI is stored instead of filepath due to permissions.
-            PreferenceManager.getDefaultSharedPreferences(context)
-                .edit().putString(getString(R.string.download_path_key), uri.toString()).apply()
-
-            // From URI -> File path
-            // File path here is purely for cosmetic purposes in settings
-            (filePath ?: uri.toString()).let {
-                PreferenceManager.getDefaultSharedPreferences(context)
-                    .edit().putString(getString(R.string.download_path_pref), it).apply()
-            }
+    private val pathPicker = getChooseFolderLauncher { uri, path ->
+        val context = context ?: AcraApplication.context ?: return@getChooseFolderLauncher
+        (path ?: uri.toString()).let {
+            PreferenceManager.getDefaultSharedPreferences(context).edit()
+                .putString(getString(R.string.download_path_key), uri.toString())
+                .putString(getString(R.string.download_path_key_visual), it)
+                .apply()
         }
+    }
 
     override fun onCreatePreferences(savedInstanceState: Bundle?, rootKey: String?) {
         hideKeyboard()
@@ -161,7 +138,7 @@ class SettingsGeneral : PreferenceFragmentCompat() {
             val ctx = context ?: return@setOnPreferenceClickListener false
 
             if (isAppRestricted(ctx)) {
-                showBatteryOptimizationDialog(ctx)
+                ctx.showBatteryOptimizationDialog()
             } else {
                 showToast(R.string.app_unrestricted_toast)
             }
@@ -314,11 +291,11 @@ class SettingsGeneral : PreferenceFragmentCompat() {
             val dirs = getDownloadDirs()
 
             val currentDir =
-                settingsManager.getString(getString(R.string.download_path_pref), null)
+                settingsManager.getString(getString(R.string.download_path_key_visual), null)
                     ?: context?.let { ctx -> VideoDownloadManager.getDefaultDir(ctx)?.filePath() }
 
             activity?.showBottomDialog(
-                dirs + listOf("Custom"),
+                dirs + listOf(getString(R.string.custom)),
                 dirs.indexOf(currentDir),
                 getString(R.string.download_path_pref),
                 true,
@@ -333,11 +310,11 @@ class SettingsGeneral : PreferenceFragmentCompat() {
                 } else {
                     // Sets both visual and actual paths.
                     // key = used path
-                    // pref = visual path
+                    // visual = visual path
                     settingsManager.edit()
-                        .putString(getString(R.string.download_path_key), dirs[it]).apply()
-                    settingsManager.edit()
-                        .putString(getString(R.string.download_path_pref), dirs[it]).apply()
+                        .putString(getString(R.string.download_path_key), dirs[it])
+                        .putString(getString(R.string.download_path_key_visual), dirs[it])
+                        .apply()
                 }
             }
             return@setOnPreferenceClickListener true
@@ -358,16 +335,13 @@ class SettingsGeneral : PreferenceFragmentCompat() {
                     try {
                         beneneCount++
                         if (beneneCount%20 == 0) {
-                            val intent = Intent(context, EasterEggMonke::class.java)
-                            startActivity(intent)
+                            activity?.navigate(R.id.action_navigation_settings_general_to_easterEggMonkeFragment)
                         }
                         settingsManager.edit().putInt(
                             getString(R.string.benene_count),
                             beneneCount
-                        )
-                            .apply()
-                        it.summary =
-                            getString(R.string.benene_count_text).format(beneneCount)
+                        ).apply()
+                        it.summary = getString(R.string.benene_count_text).format(beneneCount)
                     } catch (e: Exception) {
                         logError(e)
                     }
