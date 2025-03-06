@@ -40,19 +40,19 @@ jobs:
       - name: Grant execute permission for gradlew
         run: chmod +x gradlew
 
-      - name: Build APK and AAB
+      - name: Build APK
         run: |
             ./gradlew assemblePrerelease build androidSourcesJar
             ./gradlew makeJar # for classes.jar, has to be done after assemblePrerelease
 
-      - name: Rename APK and AAB
+      - name: Rename APK
         run: |
-          mv app/build/outputs/apk/release/app-release-unsigned.apk app/build/outputs/apk/release/${{ env.VERSIONED_NAME }}.apk
+          mv app/build/outputs/apk/prerelease/release/app-release-unsigned.apk app/build/outputs/apk/prerelease/release/${{ env.VERSIONED_NAME }}.apk
 
       - name: Align APK
         run: zipalign -v 4 app/build/outputs/apk/prerelease/release/${{ env.VERSIONED_NAME }}.apk app/build/outputs/apk/prerelease/release/${{ env.VERSIONED_NAME }}-aligned.apk
 
-      - name: Sign APK and AAB
+      - name: Sign APK
         env:
           KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
           KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
@@ -63,7 +63,7 @@ jobs:
       - name: Install GitHub CLI
         run: sudo apt-get install gh
 
-      - name: Create Release and upload APK and AAB
+      - name: Create Release and upload APK
         run: |
           echo "${{ secrets.GITHUB_TOKEN }}" | gh auth login --with-token
           gh release create ${{ github.ref }} app/build/outputs/apk/prerelease/release/${{ env.VERSIONED_NAME }}-aligned.apk app/build/outputs/bundle/prerelease/release/${{ env.VERSIONED_NAME }}.aab --title "Release ${{ github.ref_name }}" --notes "Автоматичний реліз додатку AndroidTV для перегляду фільмів з українською озвучкою в бані :) через мережу інтернет"
