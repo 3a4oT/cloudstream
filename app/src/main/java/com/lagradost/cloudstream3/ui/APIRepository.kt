@@ -19,6 +19,7 @@ import com.lagradost.cloudstream3.mvvm.safeApiCall
 import com.lagradost.cloudstream3.utils.Coroutines.threadSafeListOf
 import com.lagradost.cloudstream3.utils.ExtractorLink
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.DelicateCoroutinesApi
 import kotlinx.coroutines.GlobalScope.coroutineContext
 import kotlinx.coroutines.async
 import kotlinx.coroutines.delay
@@ -50,7 +51,7 @@ class APIRepository(val api: MainAPI) {
 
         private val cache = threadSafeListOf<SavedLoadResponse>()
         private var cacheIndex: Int = 0
-        const val cacheSize = 20
+        const val CACHE_SIZE = 20
     }
 
     private fun afterPluginsLoaded(forceReload: Boolean) {
@@ -94,9 +95,9 @@ class APIRepository(val api: MainAPI) {
                 val add = SavedLoadResponse(unixTime, response, lookingForHash)
 
                 synchronized(cache) {
-                    if (cache.size > cacheSize) {
+                    if (cache.size > CACHE_SIZE) {
                         cache[cacheIndex] = add // rolling cache
-                        cacheIndex = (cacheIndex + 1) % cacheSize
+                        cacheIndex = (cacheIndex + 1) % CACHE_SIZE
                     } else {
                         cache.add(add)
                     }
@@ -132,6 +133,7 @@ class APIRepository(val api: MainAPI) {
         delay(delta)
     }
 
+    @OptIn(DelicateCoroutinesApi::class)
     suspend fun getMainPage(page: Int, nameIndex: Int? = null): Resource<List<HomePageResponse?>> {
         return safeApiCall {
             api.lastHomepageRequest = unixTimeMS

@@ -109,8 +109,19 @@
             android:nextFocusRight="@id/cancel_btt"
 
             android:nextFocusUp="@id/subs_window_color"
-            android:nextFocusDown="@id/subs_subtitle_elevation"
+            android:nextFocusDown="@id/subs_edge_size"
             android:text="@string/subs_edge_type" />
+
+
+        <TextView
+            android:id="@+id/subs_edge_size"
+            style="@style/SettingsItem"
+            android:nextFocusLeft="@id/apply_btt"
+            android:nextFocusRight="@id/cancel_btt"
+
+            android:nextFocusUp="@id/subs_edge_type"
+            android:nextFocusDown="@id/subs_subtitle_elevation"
+            android:text="@string/subs_edge_size" />
 
         <TextView
             android:id="@+id/subs_subtitle_elevation"
@@ -153,6 +164,7 @@
             android:nextFocusUp="@id/subs_download_languages"
             android:nextFocusDown="@id/subtitles_remove_captions"
             android:text="@string/subtitles_remove_bloat"
+            app:trackTint="@color/toggle_selector"
             app:drawableEndCompat="@null" />
 
         <com.google.android.material.switchmaterial.SwitchMaterial
@@ -166,6 +178,7 @@
             android:nextFocusUp="@id/subtitles_remove_bloat"
             android:nextFocusDown="@id/subtitles_filter_sub_lang"
             android:text="@string/subtitles_remove_captions"
+            app:trackTint="@color/toggle_selector"
             app:drawableEndCompat="@null" />
 
         <com.google.android.material.switchmaterial.SwitchMaterial
@@ -179,6 +192,7 @@
             android:nextFocusUp="@id/subtitles_remove_captions"
             android:nextFocusDown="@id/subtitles_uppercase"
             android:text="@string/subtitles_filter_lang"
+            app:trackTint="@color/toggle_selector"
             app:drawableEndCompat="@null" />
 
         <com.google.android.material.switchmaterial.SwitchMaterial
@@ -192,6 +206,7 @@
             android:nextFocusUp="@id/subtitles_filter_sub_lang"
             android:nextFocusDown="@id/apply_btt"
             android:text="@string/uppercase_all_subtitles"
+            app:trackTint="@color/toggle_selector"
             app:drawableEndCompat="@null" />
 
         <TextView

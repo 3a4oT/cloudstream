@@ -19,11 +19,12 @@ import com.lagradost.cloudstream3.plugins.VotingApi.hasVoted
 import com.lagradost.cloudstream3.plugins.VotingApi.vote
 import com.lagradost.cloudstream3.utils.Coroutines.ioSafe
 import com.lagradost.cloudstream3.utils.Coroutines.main
+import com.lagradost.cloudstream3.utils.ImageLoader.loadImage
 import com.lagradost.cloudstream3.utils.SubtitleHelper.fromTwoLettersToLanguage
 import com.lagradost.cloudstream3.utils.SubtitleHelper.getFlagFromIso
 import com.lagradost.cloudstream3.utils.UIHelper.colorFromAttribute
-import com.lagradost.cloudstream3.utils.UIHelper.setImage
 import com.lagradost.cloudstream3.utils.UIHelper.toPx
+import com.lagradost.cloudstream3.utils.getImageFromDrawable
 
 
 class PluginDetailsFragment(val data: PluginViewData) : BottomSheetDialogFragment() {
@@ -61,19 +62,9 @@ class PluginDetailsFragment(val data: PluginViewData) : BottomSheetDialogFragmen
         super.onViewCreated(view, savedInstanceState)
         val metadata = data.plugin.second
         binding?.apply {
-            if (!pluginIcon.setImage(//plugin_icon?.height ?:
-                    metadata.iconUrl?.replace(
-                        "%size%",
-                        "$iconSize"
-                    )?.replace(
-                        "%exact_size%",
-                        "$iconSizeExact"
-                    ),
-                    null,
-                    errorImageDrawable = R.drawable.ic_baseline_extension_24
-                )
-            ) {
-                pluginIcon.setImageResource(R.drawable.ic_baseline_extension_24)
+            pluginIcon.loadImage(metadata.iconUrl?.replace("%size%", "$iconSize")
+                ?.replace("%exact_size%", "$iconSizeExact")) {
+                error { getImageFromDrawable(context ?: return@error null , R.drawable.ic_baseline_extension_24) }
             }
             pluginName.text = metadata.name.removeSuffix("Provider")
             pluginVersion.text = metadata.version.toString()
@@ -111,7 +102,7 @@ class PluginDetailsFragment(val data: PluginViewData) : BottomSheetDialogFragmen
             if (data.isDownloaded) {
                 // On local plugins page the filepath is provided instead of url.
                 val plugin =
-                    PluginManager.urlPlugins[metadata.url] ?: PluginManager.plugins[metadata.url]
+                    (PluginManager.urlPlugins[metadata.url] ?: PluginManager.plugins[metadata.url]) as? com.lagradost.cloudstream3.plugins.Plugin
                 if (plugin?.openSettings != null && context != null) {
                     actionSettings.isVisible = true
                     actionSettings.setOnClickListener {
@@ -159,7 +150,7 @@ class PluginDetailsFragment(val data: PluginViewData) : BottomSheetDialogFragmen
                 )
             } else {
                 upvote.imageTintList = ColorStateList.valueOf(
-                    context?.colorFromAttribute(R.attr.colorOnSurface) ?: R.color.white
+                    context?.colorFromAttribute(com.google.android.material.R.attr.colorOnSurface) ?: R.color.white
                 )
             }
         }

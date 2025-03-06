@@ -1,11 +1,10 @@
 package com.lagradost.cloudstream3.ui.account
 
 import android.annotation.SuppressLint
-import android.content.Intent
 import android.os.Bundle
 import android.util.Log
-import androidx.appcompat.app.AppCompatActivity
-import androidx.lifecycle.ViewModelProvider
+import androidx.activity.ComponentActivity
+import androidx.activity.viewModels
 import androidx.preference.PreferenceManager
 import androidx.recyclerview.widget.GridLayoutManager
 import com.lagradost.cloudstream3.CommonActivity
@@ -33,16 +32,18 @@ import com.lagradost.cloudstream3.utils.DataStoreHelper.accounts
 import com.lagradost.cloudstream3.utils.DataStoreHelper.selectedKeyIndex
 import com.lagradost.cloudstream3.utils.DataStoreHelper.setAccount
 import com.lagradost.cloudstream3.utils.UIHelper.colorFromAttribute
+import com.lagradost.cloudstream3.utils.UIHelper.openActivity
 
-class AccountSelectActivity : AppCompatActivity(), BiometricCallback {
+class AccountSelectActivity : ComponentActivity(), BiometricCallback {
 
-    lateinit var viewModel: AccountViewModel
+    val accountViewModel: AccountViewModel by viewModels()
 
     @SuppressLint("NotifyDataSetChanged")
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         loadThemes(this)
 
+        @Suppress("DEPRECATION")
         window.navigationBarColor = colorFromAttribute(R.attr.primaryBlackBackground)
 
         // Are we editing and coming from MainActivity?
@@ -54,8 +55,6 @@ class AccountSelectActivity : AppCompatActivity(), BiometricCallback {
         val settingsManager = PreferenceManager.getDefaultSharedPreferences(this)
         val skipStartup = settingsManager.getBoolean(getString(R.string.skip_startup_account_select_key), false
         ) || accounts.count() <= 1
-
-        viewModel = ViewModelProvider(this)[AccountViewModel::class.java]
 
         fun askBiometricAuth() {
 
@@ -74,7 +73,7 @@ class AccountSelectActivity : AppCompatActivity(), BiometricCallback {
             }
         }
 
-        observe(viewModel.isAllowedLogin) { isAllowedLogin ->
+        observe(accountViewModel.isAllowedLogin) { isAllowedLogin ->
             if (isAllowedLogin) {
                 // We are allowed to continue to MainActivity
                 navigateToMainActivity()
@@ -87,7 +86,7 @@ class AccountSelectActivity : AppCompatActivity(), BiometricCallback {
             val currentAccount = accounts.firstOrNull { it.keyIndex == selectedKeyIndex }
             if (currentAccount?.lockPin != null) {
                 CommonActivity.init(this)
-                viewModel.handleAccountSelect(currentAccount, this, true)
+                accountViewModel.handleAccountSelect(currentAccount, this, true)
             } else {
                 if (accounts.count() > 1) {
                     showToast(this, getString(
@@ -109,16 +108,16 @@ class AccountSelectActivity : AppCompatActivity(), BiometricCallback {
 
         val recyclerView: AutofitRecyclerView = binding.accountRecyclerView
 
-        observe(viewModel.accounts) { liveAccounts ->
+        observe(accountViewModel.accounts) { liveAccounts ->
             val adapter = AccountAdapter(
                 liveAccounts,
                 // Handle the selected account
                 accountSelectCallback = {
-                    viewModel.handleAccountSelect(it, this)
+                    accountViewModel.handleAccountSelect(it, this)
                 },
-                accountCreateCallback = { viewModel.handleAccountUpdate(it, this) },
+                accountCreateCallback = { accountViewModel.handleAccountUpdate(it, this) },
                 accountEditCallback = {
-                    viewModel.handleAccountUpdate(it, this)
+                    accountViewModel.handleAccountUpdate(it, this)
 
                     // We came from MainActivity, return there
                     // and switch to the edited account
@@ -127,7 +126,7 @@ class AccountSelectActivity : AppCompatActivity(), BiometricCallback {
                         navigateToMainActivity()
                     }
                 },
-                accountDeleteCallback = { viewModel.handleAccountDelete(it,this) }
+                accountDeleteCallback = { accountViewModel.handleAccountDelete(it,this) }
             )
 
             recyclerView.adapter = adapter
@@ -138,13 +137,13 @@ class AccountSelectActivity : AppCompatActivity(), BiometricCallback {
                 )
             }
 
-            observe(viewModel.selectedKeyIndex) { selectedKeyIndex ->
+            observe(accountViewModel.selectedKeyIndex) { selectedKeyIndex ->
                 // Scroll to current account (which is focused by default)
                 val layoutManager = recyclerView.layoutManager as GridLayoutManager
                 layoutManager.scrollToPositionWithOffset(selectedKeyIndex, 0)
             }
 
-            observe(viewModel.isEditing) { isEditing ->
+            observe(accountViewModel.isEditing) { isEditing ->
                 if (isEditing) {
                     binding.editAccountButton.setImageResource(R.drawable.ic_baseline_close_24)
                     binding.title.setText(R.string.manage_accounts)
@@ -159,7 +158,7 @@ class AccountSelectActivity : AppCompatActivity(), BiometricCallback {
             }
 
             if (isEditingFromMainActivity) {
-                viewModel.setIsEditing(true)
+                accountViewModel.setIsEditing(true)
             }
 
             binding.editAccountButton.setOnClickListener {
@@ -170,7 +169,7 @@ class AccountSelectActivity : AppCompatActivity(), BiometricCallback {
                     return@setOnClickListener
                 }
 
-                viewModel.toggleIsEditing()
+                accountViewModel.toggleIsEditing()
             }
 
             if (isLayout(TV or EMULATOR)) {
@@ -184,8 +183,7 @@ class AccountSelectActivity : AppCompatActivity(), BiometricCallback {
     }
 
     private fun navigateToMainActivity() {
-        val mainIntent = Intent(this, MainActivity::class.java)
-        startActivity(mainIntent)
+        openActivity(MainActivity::class.java)
         finish() // Finish the account selection activity
     }
 

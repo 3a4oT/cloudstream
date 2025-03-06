@@ -2,16 +2,11 @@ package com.lagradost.cloudstream3.ui.result
 
 import android.app.Activity
 import android.content.*
-import android.net.Uri
-import android.os.Build
-import android.os.Bundle
 import android.text.format.Formatter.formatFileSize
 import android.util.Log
 import android.widget.Toast
 import androidx.annotation.MainThread
 import androidx.appcompat.app.AlertDialog
-import androidx.core.content.FileProvider
-import androidx.core.net.toUri
 import androidx.lifecycle.LiveData
 import androidx.lifecycle.MutableLiveData
 import androidx.lifecycle.ViewModel
@@ -30,34 +25,28 @@ import com.lagradost.cloudstream3.LoadResponse.Companion.getAniListId
 import com.lagradost.cloudstream3.LoadResponse.Companion.getMalId
 import com.lagradost.cloudstream3.LoadResponse.Companion.isMovie
 import com.lagradost.cloudstream3.LoadResponse.Companion.readIdFromString
-import com.lagradost.cloudstream3.MainActivity.Companion.MPV
-import com.lagradost.cloudstream3.MainActivity.Companion.MPV_COMPONENT
-import com.lagradost.cloudstream3.MainActivity.Companion.MPV_PACKAGE
-import com.lagradost.cloudstream3.MainActivity.Companion.VLC
-import com.lagradost.cloudstream3.MainActivity.Companion.VLC_COMPONENT
-import com.lagradost.cloudstream3.MainActivity.Companion.VLC_PACKAGE
-import com.lagradost.cloudstream3.MainActivity.Companion.WEB_VIDEO
-import com.lagradost.cloudstream3.MainActivity.Companion.WEB_VIDEO_CAST_PACKAGE
+import com.lagradost.cloudstream3.actions.VideoClickActionHolder
 import com.lagradost.cloudstream3.metaproviders.SyncRedirector
 import com.lagradost.cloudstream3.mvvm.*
 import com.lagradost.cloudstream3.syncproviders.AccountManager
 import com.lagradost.cloudstream3.syncproviders.AccountManager.Companion.secondsToReadable
 import com.lagradost.cloudstream3.syncproviders.SyncAPI
 import com.lagradost.cloudstream3.syncproviders.providers.Kitsu
-import com.lagradost.cloudstream3.syncproviders.providers.SimklApi
 import com.lagradost.cloudstream3.ui.APIRepository
 import com.lagradost.cloudstream3.ui.WatchType
 import com.lagradost.cloudstream3.ui.download.DOWNLOAD_NAVIGATE_TO
 import com.lagradost.cloudstream3.ui.player.GeneratorPlayer
 import com.lagradost.cloudstream3.ui.player.IGenerator
-import com.lagradost.cloudstream3.ui.player.LoadType
+import com.lagradost.cloudstream3.ui.player.LOADTYPE_ALL
+import com.lagradost.cloudstream3.ui.player.LOADTYPE_CHROMECAST
+import com.lagradost.cloudstream3.ui.player.LOADTYPE_INAPP
+import com.lagradost.cloudstream3.ui.player.LOADTYPE_INAPP_DOWNLOAD
 import com.lagradost.cloudstream3.ui.player.RepoLinkGenerator
 import com.lagradost.cloudstream3.ui.player.SubtitleData
 import com.lagradost.cloudstream3.ui.result.EpisodeAdapter.Companion.getPlayerAction
 import com.lagradost.cloudstream3.ui.subtitles.SubtitlesFragment
 import com.lagradost.cloudstream3.utils.*
 import com.lagradost.cloudstream3.utils.AppContextUtils.getNameFull
-import com.lagradost.cloudstream3.utils.AppContextUtils.isAppInstalled
 import com.lagradost.cloudstream3.utils.AppContextUtils.isConnectedToChromecast
 import com.lagradost.cloudstream3.utils.AppContextUtils.setDefaultFocus
 import com.lagradost.cloudstream3.utils.AppContextUtils.sortSubs
@@ -66,6 +55,7 @@ import com.lagradost.cloudstream3.utils.Coroutines.ioSafe
 import com.lagradost.cloudstream3.utils.Coroutines.ioWork
 import com.lagradost.cloudstream3.utils.Coroutines.ioWorkSafe
 import com.lagradost.cloudstream3.utils.Coroutines.main
+import com.lagradost.cloudstream3.utils.DataStore.setKey
 import com.lagradost.cloudstream3.utils.DataStoreHelper.deleteBookmarkedData
 import com.lagradost.cloudstream3.utils.DataStoreHelper.getAllBookmarkedData
 import com.lagradost.cloudstream3.utils.DataStoreHelper.getAllFavorites
@@ -91,14 +81,8 @@ import com.lagradost.cloudstream3.utils.DataStoreHelper.setResultWatchState
 import com.lagradost.cloudstream3.utils.DataStoreHelper.setSubscribedData
 import com.lagradost.cloudstream3.utils.DataStoreHelper.setVideoWatchState
 import com.lagradost.cloudstream3.utils.DataStoreHelper.updateSubscribedData
-import com.lagradost.cloudstream3.utils.UIHelper.clipboardHelper
 import com.lagradost.cloudstream3.utils.UIHelper.navigate
-import com.lagradost.cloudstream3.utils.fcast.FcastManager
-import com.lagradost.cloudstream3.utils.fcast.FcastSession
-import com.lagradost.cloudstream3.utils.fcast.Opcode
-import com.lagradost.cloudstream3.utils.fcast.PlayMessage
 import kotlinx.coroutines.*
-import java.io.File
 import java.util.concurrent.TimeUnit
 
 /** This starts at 1 */
@@ -129,8 +113,8 @@ data class ResultData(
     val title: String,
     var syncData: Map<String, String>,
 
-    val posterImage: UiImage?,
-    val posterBackgroundImage: UiImage?,
+    val posterImage: String?,
+    val posterBackgroundImage: String?,
     val plotText: UiText,
     val apiName: UiText,
     val ratingText: UiText?,
@@ -146,6 +130,7 @@ data class ResultData(
     val nextAiringDate: UiText?,
     val nextAiringEpisode: UiText?,
     val plotHeaderText: UiText,
+    val posterHeaders: Map<String, String>? = null,
 )
 
 data class CheckDuplicateData(
@@ -158,6 +143,15 @@ enum class LibraryListType {
     BOOKMARKS,
     FAVORITES,
     SUBSCRIPTIONS
+}
+
+enum class EpisodeSortType {
+    NUMBER_ASC,
+    NUMBER_DESC,
+    RATING_HIGH_LOW,
+    RATING_LOW_HIGH,
+    DATE_NEWEST,
+    DATE_OLDEST
 }
 
 fun txt(status: DubStatus?): UiText? {
@@ -230,12 +224,9 @@ fun LoadResponse.toResultData(repo: APIRepository): ResultData {
         ),
         nextAiringDate = nextAiringDate,
         nextAiringEpisode = nextAiringEpisode,
-        posterImage = img(
-            posterUrl, posterHeaders
-        ) ?: img(R.drawable.default_cover),
-        posterBackgroundImage = img(
-            backgroundPosterUrl ?: posterUrl, posterHeaders
-        ) ?: img(R.drawable.default_cover),
+        posterImage = posterUrl ?: backgroundPosterUrl,
+        posterHeaders = posterHeaders,
+        posterBackgroundImage = backgroundPosterUrl ?: posterUrl,
         titleText = txt(name),
         url = url,
         tags = tags ?: emptyList(),
@@ -267,6 +258,8 @@ fun LoadResponse.toResultData(repo: APIRepository): ResultData {
                 TvType.Music -> R.string.music_singlar
                 TvType.AudioBook -> R.string.audio_book_singular
                 TvType.CustomMedia -> R.string.custom_media_singluar
+                TvType.Audio -> R.string.audio_singluar
+                TvType.Podcast -> R.string.podcast_singluar
             }
         ),
         yearText = txt(year?.toString()),
@@ -415,6 +408,7 @@ class ResultViewModel2 : ViewModel() {
     private var currentMeta: SyncAPI.SyncResult? = null
     private var currentSync: Map<String, String>? = null
     private var currentIndex: EpisodeIndexer? = null
+    private var currentSorting: EpisodeSortType? = null
     private var currentRange: EpisodeRange? = null
     private var currentShowFillers: Boolean = false
     var currentRepo: APIRepository? = null
@@ -468,6 +462,18 @@ class ResultViewModel2 : ViewModel() {
         MutableLiveData(null)
     val selectedRange: LiveData<UiText?> = _selectedRange
 
+    private val _selectedSorting: MutableLiveData<UiText?> =
+        MutableLiveData(null)
+    val selectedSorting: LiveData<UiText?> = _selectedSorting
+
+    private val _selectedSortingIndex: MutableLiveData<Int> =
+        MutableLiveData(-1)
+    val selectedSortingIndex: LiveData<Int> = _selectedSortingIndex
+
+    private val _sortSelections: MutableLiveData<List<Pair<UiText, EpisodeSortType>>> =
+        MutableLiveData(emptyList())
+    val sortSelections: LiveData<List<Pair<UiText, EpisodeSortType>>> = _sortSelections
+
     private val _selectedSeason: MutableLiveData<UiText?> =
         MutableLiveData(null)
     val selectedSeason: LiveData<UiText?> = _selectedSeason
@@ -514,7 +520,7 @@ class ResultViewModel2 : ViewModel() {
 
         private fun filterName(name: String?): String? {
             if (name == null) return null
-            Regex("[eE]pisode [0-9]*(.*)").find(name)?.groupValues?.get(1)?.let {
+            Regex("^[eE]pisode [0-9]*(.*)").find(name)?.groupValues?.get(1)?.let {
                 if (it.isEmpty())
                     return null
             }
@@ -651,24 +657,10 @@ class ResultViewModel2 : ViewModel() {
         }
 
         private fun getFolder(currentType: TvType, titleName: String): String {
-            val sanitizedFileName = VideoDownloadManager.sanitizeFilename(titleName)
-            return when (currentType) {
-                TvType.Anime -> "Anime/$sanitizedFileName"
-                TvType.Movie -> "Movies"
-                TvType.AnimeMovie -> "Movies"
-                TvType.TvSeries -> "TVSeries/$sanitizedFileName"
-                TvType.OVA -> "OVA"
-                TvType.Cartoon -> "Cartoons/$sanitizedFileName"
-                TvType.Torrent -> "Torrent"
-                TvType.Documentary -> "Documentaries"
-                TvType.AsianDrama -> "AsianDrama"
-                TvType.Live -> "LiveStreams"
-                TvType.NSFW -> "NSFW"
-                TvType.Others -> "Others"
-                TvType.Music -> "Music"
-                TvType.AudioBook -> "AudioBooks"
-                TvType.CustomMedia -> "Media"
-            }
+            return if (currentType.isEpisodeBased()) {
+                val sanitizedFileName = VideoDownloadManager.sanitizeFilename(titleName)
+                "${currentType.getFolderPrefix()}/$sanitizedFileName"
+            } else currentType.getFolderPrefix()
         }
 
         private fun downloadSubtitle(
@@ -800,13 +792,17 @@ class ResultViewModel2 : ViewModel() {
                 val generator = RepoLinkGenerator(listOf(episode))
                 val currentLinks = mutableSetOf<ExtractorLink>()
                 val currentSubs = mutableSetOf<SubtitleData>()
-                generator.generateLinks(clearCache = false, LoadType.Chromecast, callback = {
-                    it.first?.let { link ->
-                        currentLinks.add(link)
-                    }
-                }, subtitleCallback = { sub ->
-                    currentSubs.add(sub)
-                })
+                generator.generateLinks(
+                    clearCache = false,
+                    allowedTypes = LOADTYPE_INAPP_DOWNLOAD,
+                    callback = {
+                        it.first?.let { link ->
+                            currentLinks.add(link)
+                        }
+                    },
+                    subtitleCallback = { sub ->
+                        currentSubs.add(sub)
+                    })
 
                 if (currentLinks.isEmpty()) {
                     main {
@@ -951,7 +947,12 @@ class ResultViewModel2 : ViewModel() {
         isVisible: Boolean = true
     ) {
         if (activity == null) return
-        loadLinks(result, isVisible = isVisible, LoadType.Chromecast) { data ->
+        loadLinks(
+            result,
+            isVisible = isVisible,
+            sourceTypes = LOADTYPE_CHROMECAST,
+            isCasting = true
+        ) { data ->
             startChromecast(activity, result, data.links, data.subs, 0)
         }
     }
@@ -1213,17 +1214,19 @@ class ResultViewModel2 : ViewModel() {
 
     private fun getImdbIdFromSyncData(syncData: Map<String, String>?): String? {
         return normalSafeApiCall {
-            readIdFromString(
+            val imdbId = readIdFromString(
                 syncData?.get(AccountManager.simklApi.idPrefix)
             )[SimklSyncServices.Imdb]
+            if (imdbId == "null") null else imdbId
         }
     }
 
     private fun getTMDbIdFromSyncData(syncData: Map<String, String>?): String? {
         return normalSafeApiCall {
-            readIdFromString(
+            val tmdbId = readIdFromString(
                 syncData?.get(AccountManager.simklApi.idPrefix)
             )[SimklSyncServices.Tmdb]
+            if (tmdbId == "null") null else tmdbId
         }
     }
 
@@ -1261,7 +1264,7 @@ class ResultViewModel2 : ViewModel() {
         _loadedLinks.postValue(null)
     }
 
-    private fun postPopup(text: UiText, options: List<UiText>, callback: suspend (Int?) -> Unit) {
+    fun postPopup(text: UiText, options: List<UiText>, callback: suspend (Int?) -> Unit) {
         _selectPopup.postValue(
             SelectPopup.SelectText(
                 text,
@@ -1297,8 +1300,9 @@ class ResultViewModel2 : ViewModel() {
     private fun loadLinks(
         result: ResultEpisode,
         isVisible: Boolean,
-        type: LoadType,
+        sourceTypes: Set<ExtractorLinkType> = LOADTYPE_ALL,
         clearCache: Boolean = false,
+        isCasting: Boolean = false,
         work: suspend (CoroutineScope.(LinkLoadingResult) -> Unit)
     ) {
         currentLoadLinkJob?.cancel()
@@ -1306,8 +1310,9 @@ class ResultViewModel2 : ViewModel() {
             val links = loadLinks(
                 result,
                 isVisible = isVisible,
-                type = type,
-                clearCache = clearCache
+                sourceTypes = sourceTypes,
+                clearCache = clearCache,
+                isCasting = isCasting
             )
             if (!this.isActive) return@ioSafe
             work(links)
@@ -1317,11 +1322,12 @@ class ResultViewModel2 : ViewModel() {
     private var currentLoadLinkJob: Job? = null
     private fun acquireSingleLink(
         result: ResultEpisode,
-        type: LoadType,
+        sourceTypes: Set<ExtractorLinkType>,
         text: UiText,
-        callback: (Pair<LinkLoadingResult, Int>) -> Unit,
+        isCasting: Boolean = false,
+        callback: (Pair<LinkLoadingResult, Int>) -> Unit
     ) {
-        loadLinks(result, isVisible = true, type) { links ->
+        loadLinks(result, isVisible = true, sourceTypes, isCasting = isCasting) { links ->
             // Could not find a better way to do this
             val context = AcraApplication.context
             postPopup(
@@ -1341,7 +1347,7 @@ class ResultViewModel2 : ViewModel() {
         text: UiText,
         callback: (Pair<LinkLoadingResult, Int>) -> Unit,
     ) {
-        loadLinks(result, isVisible = true, type = LoadType.Unknown) { links ->
+        loadLinks(result, isVisible = true) { links ->
             postPopup(
                 text,
                 links.subs.map { txt(it.name) })
@@ -1354,8 +1360,9 @@ class ResultViewModel2 : ViewModel() {
     private suspend fun CoroutineScope.loadLinks(
         result: ResultEpisode,
         isVisible: Boolean,
-        type: LoadType,
+        sourceTypes: Set<ExtractorLinkType> = LOADTYPE_ALL,
         clearCache: Boolean = false,
+        isCasting: Boolean = false
     ): LinkLoadingResult {
         val tempGenerator = RepoLinkGenerator(listOf(result))
 
@@ -1368,15 +1375,21 @@ class ResultViewModel2 : ViewModel() {
         }
         try {
             updatePage()
-            tempGenerator.generateLinks(clearCache, type, { (link, _) ->
-                if (link != null) {
-                    links += link
+            tempGenerator.generateLinks(
+                clearCache,
+                allowedTypes = sourceTypes,
+                callback = { (link, _) ->
+                    if (link != null) {
+                        links += link
+                        updatePage()
+                    }
+                },
+                subtitleCallback = { sub ->
+                    subs += sub
                     updatePage()
-                }
-            }, { sub ->
-                subs += sub
-                updatePage()
-            })
+                },
+                isCasting = isCasting
+            )
         } catch (e: Exception) {
             logError(e)
         } finally {
@@ -1386,160 +1399,10 @@ class ResultViewModel2 : ViewModel() {
         return LinkLoadingResult(sortUrls(links), sortSubs(subs))
     }
 
-    private fun launchActivity(
-        activity: Activity?,
-        resumeApp: MainActivity.Companion.ResultResume,
-        id: Int? = null,
-        work: suspend (Intent.(Activity) -> Unit)
-    ): Job? {
-        val act = activity ?: return null
-        return CoroutineScope(Dispatchers.IO).launch {
-            try {
-                resumeApp.launch(id) {
-                    work(act)
-                }
-            } catch (t: Throwable) {
-                logError(t)
-                main {
-                    if (t is ActivityNotFoundException) {
-                        showToast(txt(R.string.app_not_found_error), Toast.LENGTH_LONG)
-                    } else {
-                        showToast(t.toString(), Toast.LENGTH_LONG)
-                    }
-                }
-            }
-        }
-    }
-
-    private fun playInWebVideo(
-        activity: Activity?,
-        link: ExtractorLink,
-        title: String?,
-        posterUrl: String?,
-        subtitles: List<SubtitleData>
-    ) = launchActivity(activity, WEB_VIDEO) {
-        setDataAndType(Uri.parse(link.url), "video/*")
-
-        putExtra("subs", subtitles.map { it.url.toUri() }.toTypedArray())
-        title?.let { putExtra("title", title) }
-        posterUrl?.let { putExtra("poster", posterUrl) }
-        val headers = Bundle().apply {
-            if (link.referer.isNotBlank())
-                putString("Referer", link.referer)
-            putString("User-Agent", USER_AGENT)
-            for ((key, value) in link.headers) {
-                putString(key, value)
-            }
-        }
-        putExtra("android.media.intent.extra.HTTP_HEADERS", headers)
-        putExtra("secure_uri", true)
-    }
-
-    private fun playWithMpv(
-        activity: Activity?,
-        id: Int,
-        link: ExtractorLink,
-        subtitles: List<SubtitleData>,
-        resume: Boolean = true,
-    ) = launchActivity(activity, MPV, id) {
-        putExtra("subs", subtitles.map { it.url.toUri() }.toTypedArray())
-        putExtra("subs.name", subtitles.map { it.name }.toTypedArray())
-        putExtra("subs.filename", subtitles.map { it.name }.toTypedArray())
-        setDataAndType(Uri.parse(link.url), "video/*")
-        component = MPV_COMPONENT
-        putExtra("secure_uri", true)
-        putExtra("return_result", true)
-        val position = getViewPos(id)?.position
-        if (resume && position != null)
-            putExtra("position", position.toInt())
-    }
-
-    // https://wiki.videolan.org/Android_Player_Intents/
-    private fun playWithVlc(
-        activity: Activity?,
-        data: LinkLoadingResult,
-        id: Int,
-        resume: Boolean = true,
-        // if it is only a single link then resume works correctly
-        singleFile: Boolean? = null
-    ) = launchActivity(activity, VLC, id) { act ->
-        addFlags(Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION)
-        addFlags(Intent.FLAG_GRANT_PREFIX_URI_PERMISSION)
-        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-        addFlags(Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
-
-        val outputDir = act.cacheDir
-
-        if (singleFile ?: (data.links.size == 1)) {
-            setDataAndType(data.links.first().url.toUri(), "video/*")
-        } else {
-            val outputFile = File.createTempFile("mirrorlist", ".m3u8", outputDir)
-
-            var text = "#EXTM3U"
-
-            // With subtitles it doesn't work for no reason :(
-//            for (sub in data.subs) {
-//                text += "\n#EXT-X-MEDIA:TYPE=SUBTITLES,GROUP-ID=\"subs\",NAME=\"${sub.name}\",DEFAULT=NO,AUTOSELECT=NO,FORCED=NO,LANGUAGE=\"${sub.name}\",URI=\"${sub.url}\""
-//            }
-            for (link in data.links) {
-                text += "\n#EXTINF:, ${link.name}\n${link.url}"
-            }
-            outputFile.writeText(text)
-
-            setDataAndType(
-                FileProvider.getUriForFile(
-                    act,
-                    act.applicationContext.packageName + ".provider",
-                    outputFile
-                ), "video/*"
-            )
-        }
-
-        val position = if (resume) {
-            getViewPos(id)?.position ?: 0L
-        } else {
-            1L
-        }
-
-        // Component no longer safe to use in A13 for VLC
-        // https://code.videolan.org/videolan/vlc-android/-/issues/2776
-        // This will likely need to be updated once VLC fixes their documentation.
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) {
-            component = VLC_COMPONENT
-        }
-
-        putExtra("from_start", !resume)
-        putExtra("position", position)
-    }
-
-
     fun handleAction(click: EpisodeClickEvent) =
         viewModelScope.launchSafe {
             handleEpisodeClickEvent(click)
         }
-
-    data class ExternalApp(
-        val packageString: String,
-        val name: Int,
-        val action: Int,
-    )
-
-    private val apps = listOf(
-        ExternalApp(
-            VLC_PACKAGE,
-            R.string.player_settings_play_in_vlc,
-            ACTION_PLAY_EPISODE_IN_VLC_PLAYER
-        ), ExternalApp(
-            WEB_VIDEO_CAST_PACKAGE,
-            R.string.player_settings_play_in_web,
-            ACTION_PLAY_EPISODE_IN_WEB_VIDEO
-        ),
-        ExternalApp(
-            MPV_PACKAGE,
-            R.string.player_settings_play_in_mpv,
-            ACTION_PLAY_EPISODE_IN_MPV
-        )
-    )
 
     fun releaseEpisodeSynopsis() {
         _episodeSynopsis.postValue(null)
@@ -1549,6 +1412,7 @@ class ResultViewModel2 : ViewModel() {
         when (click.action) {
             ACTION_SHOW_OPTIONS -> {
                 val options = mutableListOf<Pair<UiText, Int>>()
+
                 if (activity?.isConnectedToChromecast() == true) {
                     options.addAll(
                         listOf(
@@ -1558,34 +1422,19 @@ class ResultViewModel2 : ViewModel() {
                     )
                 }
 
-                if (FcastManager.currentDevices.isNotEmpty()) {
-                    options.add(
-                        txt(R.string.player_settings_play_in_fcast) to ACTION_FCAST
-                    )
-                }
-
                 options.add(txt(R.string.episode_action_play_in_app) to ACTION_PLAY_EPISODE_IN_PLAYER)
-
-                for (app in apps) {
-                    if (activity?.isAppInstalled(app.packageString) == true) {
-                        options.add(
-                            txt(
-                                R.string.episode_action_play_in_format,
-                                txt(app.name)
-                            ) to app.action
-                        )
-                    }
-                }
 
                 options.addAll(
                     listOf(
-                        txt(R.string.episode_action_play_in_browser) to ACTION_PLAY_EPISODE_IN_BROWSER,
-                        txt(R.string.episode_action_copy_link) to ACTION_COPY_LINK,
                         txt(R.string.episode_action_auto_download) to ACTION_DOWNLOAD_EPISODE,
                         txt(R.string.episode_action_download_mirror) to ACTION_DOWNLOAD_MIRROR,
                         txt(R.string.episode_action_download_subtitle) to ACTION_DOWNLOAD_EPISODE_SUBTITLE_MIRROR,
                         txt(R.string.episode_action_reload_links) to ACTION_RELOAD_EPISODE,
                     )
+                )
+
+                options.addAll(
+                    VideoClickActionHolder.makeOptionMap(activity, click.data)
                 )
 
                 // Do not add mark as watched on movies
@@ -1689,7 +1538,7 @@ class ResultViewModel2 : ViewModel() {
                 val response = currentResponse ?: return
                 acquireSingleLink(
                     click.data,
-                    LoadType.InAppDownload,
+                    LOADTYPE_INAPP_DOWNLOAD,
                     txt(R.string.episode_action_download_mirror)
                 ) { (result, index) ->
                     ioSafe {
@@ -1719,7 +1568,7 @@ class ResultViewModel2 : ViewModel() {
                     loadLinks(
                         click.data,
                         isVisible = false,
-                        type = LoadType.InApp,
+                        LOADTYPE_INAPP,
                         clearCache = true
                     )
                 }
@@ -1732,121 +1581,16 @@ class ResultViewModel2 : ViewModel() {
             ACTION_CHROME_CAST_MIRROR -> {
                 acquireSingleLink(
                     click.data,
-                    LoadType.Chromecast,
-                    txt(R.string.episode_action_chromecast_mirror)
+                    LOADTYPE_CHROMECAST,
+                    txt(R.string.episode_action_chromecast_mirror),
+                    isCasting = true
                 ) { (result, index) ->
                     startChromecast(activity, click.data, result.links, result.subs, index)
                 }
             }
 
-            ACTION_FCAST -> {
-                val devices = FcastManager.currentDevices.toList()
-                postPopup(
-                    txt(R.string.player_settings_select_cast_device),
-                    devices.map { txt(it.name) }) { index ->
-                    if (index == null) return@postPopup
-                    val device = devices.getOrNull(index)
-
-                    acquireSingleLink(
-                        click.data,
-                        LoadType.Fcast,
-                        txt(R.string.episode_action_cast_mirror)
-                    ) { (result, index) ->
-                        val host = device?.host ?: return@acquireSingleLink
-                        val link = result.links.getOrNull(index) ?: return@acquireSingleLink
-
-                        FcastSession(host).use { session ->
-                            session.sendMessage(
-                                Opcode.Play,
-                                PlayMessage(
-                                    link.type.getMimeType(),
-                                    link.url,
-                                    headers = mapOf(
-                                        "referer" to link.referer,
-                                        "user-agent" to USER_AGENT
-                                    ) + link.headers
-                                )
-                            )
-                        }
-                    }
-                }
-            }
-
-            ACTION_PLAY_EPISODE_IN_BROWSER -> acquireSingleLink(
-                click.data,
-                LoadType.Browser,
-                txt(R.string.episode_action_play_in_browser)
-            ) { (result, index) ->
-                try {
-                    val i = Intent(Intent.ACTION_VIEW)
-                    i.data = Uri.parse(result.links[index].url)
-                    activity?.startActivity(i)
-                } catch (e: Exception) {
-                    logError(e)
-                }
-            }
-
-            ACTION_COPY_LINK -> {
-                acquireSingleLink(
-                    click.data,
-                    LoadType.ExternalApp,
-                    txt(R.string.episode_action_copy_link)
-                ) { (result, index) ->
-                    val link = result.links[index]
-                    clipboardHelper(txt(link.name), link.url)
-                }
-            }
-
             ACTION_CHROME_CAST_EPISODE -> {
                 startChromecast(activity, click.data)
-            }
-
-            ACTION_PLAY_EPISODE_IN_VLC_PLAYER -> {
-                loadLinks(click.data, isVisible = true, LoadType.ExternalApp) { links ->
-                    if (links.links.isEmpty()) {
-                        showToast(R.string.no_links_found_toast, Toast.LENGTH_SHORT)
-                        return@loadLinks
-                    }
-
-                    playWithVlc(
-                        activity,
-                        links,
-                        click.data.id
-                    )
-                }
-            }
-
-            ACTION_PLAY_EPISODE_IN_WEB_VIDEO -> acquireSingleLink(
-                click.data,
-                LoadType.Chromecast,
-                txt(
-                    R.string.episode_action_play_in_format,
-                    txt(R.string.player_settings_play_in_web)
-                )
-            ) { (result, index) ->
-                playInWebVideo(
-                    activity,
-                    result.links[index],
-                    click.data.name ?: click.data.headerName,
-                    click.data.poster,
-                    result.subs
-                )
-            }
-
-            ACTION_PLAY_EPISODE_IN_MPV -> acquireSingleLink(
-                click.data,
-                LoadType.Chromecast,
-                txt(
-                    R.string.episode_action_play_in_format,
-                    txt(R.string.player_settings_play_in_mpv)
-                )
-            ) { (result, index) ->
-                playWithMpv(
-                    activity,
-                    click.data.id,
-                    result.links[index],
-                    result.subs
-                )
             }
 
             ACTION_PLAY_EPISODE_IN_PLAYER -> {
@@ -1864,7 +1608,7 @@ class ResultViewModel2 : ViewModel() {
                 if (currentResponse?.type == TvType.CustomMedia) {
                     generator?.generateLinks(
                         clearCache = true,
-                        LoadType.Unknown,
+                        LOADTYPE_ALL,
                         callback = {},
                         subtitleCallback = {})
                 } else {
@@ -1889,6 +1633,35 @@ class ResultViewModel2 : ViewModel() {
 
                 // Kinda dirty to reload all episodes :(
                 reloadEpisodes()
+            }
+
+            else -> {
+                val action = VideoClickActionHolder.getActionById(click.action) ?: return
+
+                activity?.setKey("last_click_action", action.uniqueId())
+                if (action.oneSource) {
+                    acquireSingleLink(
+                        click.data,
+                        action.sourceTypes,
+                        action.name
+                    ) { (result, index) ->
+                        action.runActionSafe(
+                            activity,
+                            click.data,
+                            result,
+                            index
+                        )
+                    }
+                } else {
+                    loadLinks(click.data, isVisible = true, action.sourceTypes) { links ->
+                        action.runActionSafe(
+                            activity,
+                            click.data,
+                            links,
+                            null
+                        )
+                    }
+                }
             }
         }
     }
@@ -1997,7 +1770,7 @@ class ResultViewModel2 : ViewModel() {
                             isResponseRequired = false
                         )
                     if (map.isNullOrEmpty()) return@argamap
-                    updateEpisodes = DubStatus.values().map { dubStatus ->
+                    updateEpisodes = DubStatus.entries.map { dubStatus ->
                         val current =
                             this.episodes[dubStatus]?.mapIndexed { index, episode ->
                                 episode.apply {
@@ -2066,15 +1839,21 @@ class ResultViewModel2 : ViewModel() {
     }
 
     fun changeDubStatus(status: DubStatus) {
-        postEpisodeRange(currentIndex?.copy(dubStatus = status), currentRange)
+        postEpisodeRange(currentIndex?.copy(dubStatus = status), currentRange, currentSorting ?: DataStoreHelper.resultsSortingMode)
     }
 
     fun changeRange(range: EpisodeRange) {
-        postEpisodeRange(currentIndex, range)
+        postEpisodeRange(currentIndex, range, currentSorting ?: DataStoreHelper.resultsSortingMode)
     }
 
     fun changeSeason(season: Int) {
-        postEpisodeRange(currentIndex?.copy(season = season), currentRange)
+        postEpisodeRange(currentIndex?.copy(season = season), currentRange, currentSorting ?: DataStoreHelper.resultsSortingMode)
+    }
+
+    fun setSort(sortType: EpisodeSortType) {
+        // we only update here as postEpisodeRange might change the sorting mode if it does not fit
+        DataStoreHelper.resultsSortingMode = sortType
+        postEpisodeRange(currentIndex, currentRange, sortType)
     }
 
     private fun getMovie(): ResultEpisode? {
@@ -2084,26 +1863,37 @@ class ResultViewModel2 : ViewModel() {
         }
     }
 
-    private fun getEpisodes(indexer: EpisodeIndexer, range: EpisodeRange): List<ResultEpisode> {
-        val startIndex = range.startIndex
-        val length = range.length
-
-        return currentEpisodes[indexer]
-            ?.let { list ->
-                val start = minOf(list.size, startIndex)
-                val end = minOf(list.size, start + length)
-                list.subList(start, end).map {
-                    val posDur = getViewPos(it.id)
-                    val watchState =
-                        getVideoWatchState(it.id) ?: VideoWatchState.None
-                    it.copy(
-                        position = posDur?.position ?: 0,
-                        duration = posDur?.duration ?: 0,
-                        videoWatchState = watchState
-                    )
-                }
+    private fun getEpisodes(
+        indexer: EpisodeIndexer,
+        range: EpisodeRange,
+    ): List<ResultEpisode> {
+        return currentEpisodes[indexer]?.let { list ->
+            val start = minOf(list.size, range.startIndex)
+            val end = minOf(list.size, start + range.length)
+            list.subList(start, end).map {
+                val posDur = getViewPos(it.id)
+                val watchState = getVideoWatchState(it.id) ?: VideoWatchState.None
+                it.copy(
+                    position = posDur?.position ?: 0,
+                    duration = posDur?.duration ?: 0,
+                    videoWatchState = watchState
+                )
             }
-            ?: emptyList()
+        } ?: emptyList()
+    }
+
+    private fun getSortedEpisodes(
+        episodes: List<ResultEpisode>,
+        sorting: EpisodeSortType
+    ): List<ResultEpisode> {
+        return when (sorting) {
+            EpisodeSortType.NUMBER_ASC -> episodes.sortedBy { it.episode }
+            EpisodeSortType.NUMBER_DESC -> episodes.sortedByDescending { it.episode }
+            EpisodeSortType.RATING_HIGH_LOW -> episodes.sortedByDescending { it.rating ?: 0 }
+            EpisodeSortType.RATING_LOW_HIGH -> episodes.sortedBy { it.rating ?: 0 }
+            EpisodeSortType.DATE_NEWEST -> episodes.sortedByDescending { it.airDate }
+            EpisodeSortType.DATE_OLDEST -> episodes.sortedBy { it.airDate }
+        }
     }
 
     private fun postMovie() {
@@ -2142,9 +1932,11 @@ class ResultViewModel2 : ViewModel() {
         } else {
             _episodes.postValue(
                 Resource.Success(
-                    getEpisodes(
-                        currentIndex ?: return,
-                        currentRange ?: return
+                    getSortedEpisodes(
+                        getEpisodes(
+                            currentIndex ?: return,
+                            currentRange ?: return,
+                        ), currentSorting ?: return
                     )
                 )
             )
@@ -2163,7 +1955,7 @@ class ResultViewModel2 : ViewModel() {
         // lets say that we have subscribed, then we must be able to unsubscribe no matter what
         else if (data != null) {
             _subscribeStatus.postValue(true)
-        }
+        } else _subscribeStatus.postValue(null)
     }
 
     private fun postFavorites(loadResponse: LoadResponse) {
@@ -2172,8 +1964,24 @@ class ResultViewModel2 : ViewModel() {
         _favoriteStatus.postValue(isFavorite)
     }
 
-    private fun postEpisodeRange(indexer: EpisodeIndexer?, range: EpisodeRange?) {
-        if (range == null || indexer == null) {
+    private fun shouldEnableSort(type: EpisodeSortType, episodes: List<ResultEpisode>?): Boolean {
+        if (episodes.isNullOrEmpty()) return false
+        return when (type) {
+            EpisodeSortType.NUMBER_ASC, EpisodeSortType.NUMBER_DESC -> true
+            EpisodeSortType.RATING_HIGH_LOW, EpisodeSortType.RATING_LOW_HIGH ->
+                episodes.any { it.rating != null }
+
+            EpisodeSortType.DATE_NEWEST, EpisodeSortType.DATE_OLDEST ->
+                episodes.any { it.airDate != null }
+        }
+    }
+
+    private fun postEpisodeRange(
+        indexer: EpisodeIndexer?,
+        range: EpisodeRange?,
+        sorting: EpisodeSortType?
+    ) {
+        if (range == null || indexer == null || sorting == null) {
             return
         }
 
@@ -2181,10 +1989,10 @@ class ResultViewModel2 : ViewModel() {
 
         if (ranges?.contains(range) != true) {
             // if the current ranges does not include the range then select the range with the closest matching start episode
-            // this usually happends when dub has less episodes then sub -> the range does not exist
+            // this usually happens when dub has less episodes then sub -> the range does not exist
             ranges?.minByOrNull { kotlin.math.abs(it.startEpisode - range.startEpisode) }
                 ?.let { r ->
-                    postEpisodeRange(indexer, r)
+                    postEpisodeRange(indexer, r, sorting)
                     return
                 }
         }
@@ -2287,16 +2095,64 @@ class ResultViewModel2 : ViewModel() {
         }
 
         if (isMovie) {
+            _sortSelections.postValue(emptyList())
+            _selectedSortingIndex.postValue(-1)
+            _selectedSorting.postValue(null)
+
             postMovie()
         } else {
             val ret = getEpisodes(indexer, range)
-            /*if (ret.isEmpty()) {
-                val index = ranges?.indexOf(range)
-                if(index != null && index > 0) {
 
+            if (ret.size <= 1) {
+                // we cant sort on an empty list or a list with only 1 episode
+                _sortSelections.postValue(emptyList())
+                _selectedSortingIndex.postValue(-1)
+                _selectedSorting.postValue(null)
+                _episodes.postValue(Resource.Success(ret))
+            } else {
+                val sortOptions = mutableListOf<Pair<UiText, EpisodeSortType>>().apply {
+                    // Episode number sorting is always available
+                    add(txt(R.string.sort_episodes_number_asc) to EpisodeSortType.NUMBER_ASC)
+                    add(txt(R.string.sort_episodes_number_desc) to EpisodeSortType.NUMBER_DESC)
+
+                    // Only add rating options if any episodes have ratings
+                    if (shouldEnableSort(EpisodeSortType.RATING_HIGH_LOW, ret)) {
+                        add(txt(R.string.sort_episodes_rating_high_low) to EpisodeSortType.RATING_HIGH_LOW)
+                        add(txt(R.string.sort_episodes_rating_low_high) to EpisodeSortType.RATING_LOW_HIGH)
+                    }
+
+                    // Only add air date options if any episodes have air dates
+                    if (shouldEnableSort(EpisodeSortType.DATE_NEWEST, ret)) {
+                        add(txt(R.string.sort_episodes_date_newest) to EpisodeSortType.DATE_NEWEST)
+                        add(txt(R.string.sort_episodes_date_oldest) to EpisodeSortType.DATE_OLDEST)
+                    }
                 }
-            }*/
-            _episodes.postValue(Resource.Success(ret))
+
+                var sortIndex = sortOptions.indexOfFirst { it.second == sorting }
+
+                // correct the sorting order so if we have a selected that is not possible we just choose the default NUMBER_ASC
+                val correctedSorting = if (sortIndex == -1) {
+                    sortIndex = 0
+                    EpisodeSortType.NUMBER_ASC
+                } else {
+                    sorting
+                }
+
+                currentSorting = correctedSorting
+                _sortSelections.postValue(sortOptions)
+                _selectedSortingIndex.postValue(sortIndex)
+                _selectedSorting.postValue(
+                    when (correctedSorting) {
+                        EpisodeSortType.NUMBER_ASC -> txt(R.string.sort_button_episode, "↑")
+                        EpisodeSortType.NUMBER_DESC -> txt(R.string.sort_button_episode, "↓")
+                        EpisodeSortType.RATING_HIGH_LOW -> txt(R.string.sort_button_rating, "↓")
+                        EpisodeSortType.RATING_LOW_HIGH -> txt(R.string.sort_button_rating, "↑")
+                        EpisodeSortType.DATE_NEWEST -> txt(R.string.sort_button_date, "↓")
+                        EpisodeSortType.DATE_OLDEST -> txt(R.string.sort_button_date, "↑")
+                    }
+                )
+                _episodes.postValue(Resource.Success(getSortedEpisodes(ret, correctedSorting)))
+            }
         }
     }
 
@@ -2371,7 +2227,8 @@ class ResultViewModel2 : ViewModel() {
                                     loadResponse.type,
                                     mainId,
                                     totalIndex,
-                                    airDate = i.date
+                                    airDate = i.date,
+                                    runTime = i.runTime,
                                 )
 
                             val season = eps.seasonIndex ?: 0
@@ -2426,7 +2283,8 @@ class ResultViewModel2 : ViewModel() {
                                 loadResponse.type,
                                 mainId,
                                 totalIndex,
-                                airDate = episode.date
+                                airDate = episode.date,
+                                runTime = episode.runTime,
                             )
 
                         val season = ep.seasonIndex ?: 0
@@ -2561,7 +2419,7 @@ class ResultViewModel2 : ViewModel() {
             it.startEpisode >= (preferStartEpisode ?: 0)
         } ?: ranger?.lastOrNull()
 
-        postEpisodeRange(min, range)
+        postEpisodeRange(min, range, DataStoreHelper.resultsSortingMode)
         postResume()
     }
 
@@ -2632,6 +2490,7 @@ class ResultViewModel2 : ViewModel() {
                                     trailerData.extractorUrl,
                                     trailerData.referer ?: "",
                                     Qualities.Unknown.value,
+                                    headers = trailerData.headers,
                                     type = INFER_TYPE
                                 )
                             ) to arrayListOf()
@@ -2721,7 +2580,7 @@ class ResultViewModel2 : ViewModel() {
         val id: Int?,
     ) : LoadResponse
 
-    fun loadSmall(activity: Activity?, searchResponse: SearchResponse) = ioSafe {
+    fun loadSmall(searchResponse: SearchResponse) = ioSafe {
         val url = searchResponse.url
         _page.postValue(Resource.Loading(url))
         _episodes.postValue(Resource.Loading())

@@ -40,7 +40,8 @@ jobs:
       - name: Clean old builds
         run: |
           cd $GITHUB_WORKSPACE/dokka/
-          rm -rf "./-cloudstream"
+          rm -rf "./app"
+          rm -rf "./library"
 
       - name: Setup JDK 17
         uses: actions/setup-java@v4
@@ -55,11 +56,11 @@ jobs:
         run: |
           cd $GITHUB_WORKSPACE/src/
           chmod +x gradlew
-          ./gradlew app:dokkaHtml
+          ./gradlew docs:dokkaGeneratePublicationHtml
 
       - name: Copy Dokka
         run: |
-          cp -r $GITHUB_WORKSPACE/src/app/build/dokka/html/* $GITHUB_WORKSPACE/dokka/
+          cp -r $GITHUB_WORKSPACE/src/docs/build/dokka/html/* $GITHUB_WORKSPACE/dokka/
 
       - name: Push builds
         run: |

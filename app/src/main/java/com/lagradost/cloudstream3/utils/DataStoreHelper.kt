@@ -2,8 +2,8 @@ package com.lagradost.cloudstream3.utils
 
 import android.content.Context
 import com.fasterxml.jackson.annotation.JsonProperty
-import com.lagradost.cloudstream3.*
 import com.lagradost.cloudstream3.APIHolder.unixTimeMS
+import com.lagradost.cloudstream3.AcraApplication
 import com.lagradost.cloudstream3.AcraApplication.Companion.context
 import com.lagradost.cloudstream3.AcraApplication.Companion.getKey
 import com.lagradost.cloudstream3.AcraApplication.Companion.getKeys
@@ -11,13 +11,23 @@ import com.lagradost.cloudstream3.AcraApplication.Companion.removeKey
 import com.lagradost.cloudstream3.AcraApplication.Companion.removeKeys
 import com.lagradost.cloudstream3.AcraApplication.Companion.setKey
 import com.lagradost.cloudstream3.CommonActivity.showToast
+import com.lagradost.cloudstream3.DubStatus
+import com.lagradost.cloudstream3.EpisodeResponse
+import com.lagradost.cloudstream3.MainActivity
+import com.lagradost.cloudstream3.R
+import com.lagradost.cloudstream3.SearchQuality
+import com.lagradost.cloudstream3.SearchResponse
+import com.lagradost.cloudstream3.TvType
 import com.lagradost.cloudstream3.syncproviders.AccountManager
 import com.lagradost.cloudstream3.syncproviders.SyncAPI
 import com.lagradost.cloudstream3.ui.WatchType
 import com.lagradost.cloudstream3.ui.library.ListSorting
-import com.lagradost.cloudstream3.ui.result.UiImage
+import com.lagradost.cloudstream3.ui.result.EpisodeSortType
 import com.lagradost.cloudstream3.ui.result.VideoWatchState
 import com.lagradost.cloudstream3.utils.AppContextUtils.filterProviderByPreferredMedia
+import java.util.Calendar
+import java.util.Date
+import java.util.GregorianCalendar
 import kotlin.reflect.KClass
 import kotlin.reflect.KProperty
 
@@ -33,6 +43,7 @@ const val RESULT_RESUME_WATCHING_HAS_MIGRATED = "result_resume_watching_migrated
 const val RESULT_EPISODE = "result_episode"
 const val RESULT_SEASON = "result_season"
 const val RESULT_DUB = "result_dub"
+const val KEY_RESULT_SORT = "result_sort"
 
 
 class UserPreferenceDelegate<T : Any>(
@@ -110,6 +121,12 @@ object DataStoreHelper {
     var playBackSpeed : Float by UserPreferenceDelegate("playback_speed", 1.0f)
     var resizeMode : Int by UserPreferenceDelegate("resize_mode", 0)
     var librarySortingMode : Int by UserPreferenceDelegate("library_sorting_mode", ListSorting.AlphabeticalA.ordinal)
+    private var _resultsSortingMode : Int by UserPreferenceDelegate("results_sorting_mode", EpisodeSortType.NUMBER_ASC.ordinal)
+    var resultsSortingMode : EpisodeSortType
+        get() = EpisodeSortType.entries.getOrNull(_resultsSortingMode) ?: EpisodeSortType.NUMBER_ASC
+        set(value) {
+            _resultsSortingMode = value.ordinal
+        }
 
     data class Account(
         @JsonProperty("keyIndex")
@@ -123,10 +140,7 @@ object DataStoreHelper {
         @JsonProperty("lockPin")
         val lockPin: String? = null,
     ) {
-        val image: UiImage
-            get() = customImage?.let { UiImage.Image(it) } ?: UiImage.Drawable(
-                profileImages.getOrNull(defaultImageIndex) ?: profileImages.first()
-            )
+        val image get() = customImage?.let { UiImage.Image(it) } ?: profileImages.getOrNull(defaultImageIndex)?.let { UiImage.Drawable(it) } ?: UiImage.Drawable(profileImages.first())
     }
 
     const val TAG = "data_store_helper"
@@ -181,6 +195,19 @@ object DataStoreHelper {
         }
     }
 
+    /** Gets the current selected account (or default), may return null if context is null and the user is using the default account */
+    fun getCurrentAccount(): Account? {
+        return (context?.let {
+            getAccounts(it)
+        } ?: accounts.toList()).firstNotNullOfOrNull { account ->
+            if (account.keyIndex == selectedKeyIndex) {
+                account
+            } else {
+                null
+            }
+        }
+    }
+
     data class PosDur(
         @JsonProperty("position") val position: Long,
         @JsonProperty("duration") val duration: Long
@@ -194,6 +221,8 @@ object DataStoreHelper {
         if (percentage >= 95) return PosDur(duration, duration)
         return this
     }
+
+    fun Int.toYear() : Date = GregorianCalendar.getInstance().also { it.set(Calendar.YEAR, this) }.time
 
     /**
      * Used to display notifications on new episodes and posters in library.
@@ -242,7 +271,7 @@ object DataStoreHelper {
                 null,
                 null,
                 latestUpdatedTime,
-                apiName, type, posterUrl, posterHeaders, quality, this.id, plot = this.plot, rating = this.rating, tags = this.tags
+                apiName, type, posterUrl, posterHeaders, quality, year?.toYear(), this.id, plot = this.plot, rating = this.rating, tags = this.tags
             )
         }
     }
@@ -273,7 +302,7 @@ object DataStoreHelper {
                 null,
                 null,
                 latestUpdatedTime,
-                apiName, type, posterUrl, posterHeaders, quality, this.id, plot = this.plot, rating = this.rating, tags = this.tags
+                apiName, type, posterUrl, posterHeaders, quality, year?.toYear(), this.id, plot = this.plot, rating = this.rating, tags = this.tags
             )
         }
     }
@@ -304,7 +333,7 @@ object DataStoreHelper {
                 null,
                 null,
                 latestUpdatedTime,
-                apiName, type, posterUrl, posterHeaders, quality, this.id, plot = this.plot, rating = this.rating, tags = this.tags
+                apiName, type, posterUrl, posterHeaders, quality, year?.toYear(), this.id, plot = this.plot, rating = this.rating, tags = this.tags
             )
         }
     }

@@ -4,13 +4,14 @@ import com.fasterxml.jackson.annotation.JsonProperty
 import com.lagradost.cloudstream3.ErrorLoadingException
 import com.lagradost.cloudstream3.SubtitleFile
 import com.lagradost.cloudstream3.app
-import com.lagradost.cloudstream3.base64Encode
+import com.lagradost.cloudstream3.utils.AppUtils.tryParseJson
 import com.lagradost.cloudstream3.utils.ExtractorApi
 import com.lagradost.cloudstream3.utils.ExtractorLink
 import com.lagradost.cloudstream3.utils.M3u8Helper
+import java.net.URLDecoder
 import javax.crypto.Cipher
 import javax.crypto.spec.SecretKeySpec
-import kotlin.run
+import kotlin.io.encoding.Base64
 
 // Code found in https://github.com/KillerDogeEmpire/vidplay-keys
 // special credits to @KillerDogeEmpire for providing key
@@ -33,29 +34,38 @@ class VidplayOnline : Vidplay() {
     override val mainUrl = "https://vidplay.online"
 }
 
+object RowdyAvocadoKeys {
+    data class KeysData(
+        @JsonProperty("vidplay") val vidplay: List<Step> = emptyList(),
+        @JsonProperty("chillx") val chillx: List<String> = emptyList(),
+        @JsonProperty("vidsrcto") val vidsrcto: List<Step> = emptyList(),
+    )
+
+    data class Step(
+        @JsonProperty("sequence") val sequence: Int,
+        @JsonProperty("method") val method: String,
+        @JsonProperty("keys") val keys: List<String>? = null
+    )
+
+    private const val SOURCE = "https://rowdy-avocado.github.io/multi-keys/"
+
+    private var keys: KeysData? = null
+
+    suspend fun getKeys(): KeysData {
+        return keys
+            ?: run {
+                keys = app.get(SOURCE).parsedSafe<KeysData>()
+                    ?: throw ErrorLoadingException("Unable to get keys")
+                keys!!
+            }
+    }
+}
+
+@OptIn(kotlin.io.encoding.ExperimentalEncodingApi::class)
 open class Vidplay : ExtractorApi() {
     override val name = "Vidplay"
     override val mainUrl = "https://vidplay.site"
     override val requiresReferer = true
-
-    companion object {
-        private val keySource = "https://rowdy-avocado.github.io/multi-keys/"
-
-        private var keys: List<String>? = null
-
-        private suspend fun getKeys(): List<String> {
-            return keys
-                    ?: run {
-                        val res =
-                                app.get(keySource).parsedSafe<KeysData>()
-                                        ?: throw ErrorLoadingException("Unable to get keys")
-                        keys = res.keys
-                        res.keys
-                    }
-        }
-
-        private data class KeysData(@JsonProperty("vidplay") val keys: List<String>)
-    }
 
     override suspend fun getUrl(
         url: String,
@@ -63,59 +73,94 @@ open class Vidplay : ExtractorApi() {
         subtitleCallback: (SubtitleFile) -> Unit,
         callback: (ExtractorLink) -> Unit
     ) {
+        val myKeys = RowdyAvocadoKeys.getKeys()
+        val domain = url.substringBefore("/e/")
         val id = url.substringBefore("?").substringAfterLast("/")
-        val encodeId = encodeId(id, getKeys())
-        val mediaUrl = callFutoken(encodeId, url)
-        val res = app.get(
-            "$mediaUrl", headers = mapOf(
-                "Accept" to "application/json, text/javascript, */*; q=0.01",
-                "X-Requested-With" to "XMLHttpRequest",
-            ), referer = url
-        ).parsedSafe<Response>()?.result
-
+        val encodedId = vrfEncrypt(myKeys, id)
+        val t = url.substringAfter("t=").substringBefore("&")
+        val h = rc4Encryption(myKeys.vidplay.find { it.method == "h" }?.keys?.get(0) ?: return, id)
+        val mediaUrl = "$domain/mediainfo/$encodedId?t=$t&h=$h"
+        val encodedRes = app.get("$mediaUrl").parsedSafe<Response>()?.result
+            ?: throw Exception("Unable to fetch link")
+        val decodedRes = vrfDecrypt(myKeys, encodedRes)
+        val res = tryParseJson<Result>(decodedRes)
         res?.sources?.map {
-            M3u8Helper.generateM3u8(
-                this.name,
-                it.file ?: return@map,
-                "$mainUrl/"
-            ).forEach(callback)
+            M3u8Helper.generateM3u8(this.name, it.file ?: return@map, "$mainUrl/").forEach(callback)
         }
 
         res?.tracks?.filter { it.kind == "captions" }?.map {
-            subtitleCallback.invoke(
-                SubtitleFile(it.label ?: return@map, it.file ?: return@map)
-            )
+            subtitleCallback.invoke(SubtitleFile(it.label ?: return@map, it.file ?: return@map))
         }
-
     }
 
-    private suspend fun callFutoken(id: String, url: String): String? {
-        val script = app.get("$mainUrl/futoken", referer = url).text
-        val k = "k='(\\S+)'".toRegex().find(script)?.groupValues?.get(1) ?: return null
-        val a = mutableListOf(k)
-        for (i in id.indices) {
-            a.add((k[i % k.length].code + id[i].code).toString())
+    private fun vrfEncrypt(keys: RowdyAvocadoKeys.KeysData, input: String): String? {
+        var vrf = input
+        keys.vidplay.sortedBy { it.sequence }.forEach { step ->
+            when (step.method) {
+                "exchange" -> vrf = exchange(
+                    vrf,
+                    step.keys?.get(0) ?: return@forEach,
+                    step.keys?.get(1) ?: return@forEach
+                )
+
+                "rc4" -> vrf = rc4Encryption(step.keys?.get(0) ?: return@forEach, vrf)
+                "reverse" -> vrf = vrf.reversed()
+                "base64" -> vrf = Base64.UrlSafe.encode(vrf.toByteArray())
+                "else" -> {}
+            }
         }
-        return "$mainUrl/mediainfo/${a.joinToString(",")}?${url.substringAfter("?")}"
+        // vrf = java.net.URLEncoder.encode(vrf, "UTF-8")
+        return vrf
     }
 
-    private fun encodeId(id: String, keyList: List<String>): String {
-        val cipher1 = Cipher.getInstance("RC4")
-        val cipher2 = Cipher.getInstance("RC4")
-        cipher1.init(
-            Cipher.DECRYPT_MODE,
-            SecretKeySpec(keyList[0].toByteArray(), "RC4"),
-            cipher1.parameters
-        )
-        cipher2.init(
-            Cipher.DECRYPT_MODE,
-            SecretKeySpec(keyList[1].toByteArray(), "RC4"),
-            cipher2.parameters
-        )
-        var input = id.toByteArray()
-        input = cipher1.doFinal(input)
-        input = cipher2.doFinal(input)
-        return base64Encode(input).replace("/", "_")
+    private fun vrfDecrypt(keys: RowdyAvocadoKeys.KeysData, input: String): String {
+        var vrf = input
+        keys.vidplay.sortedByDescending { it.sequence }.forEach { step ->
+            when (step.method) {
+                "exchange" -> vrf = exchange(
+                    vrf,
+                    step.keys?.get(1) ?: return@forEach,
+                    step.keys?.get(0) ?: return@forEach
+                )
+
+                "rc4" -> vrf = rc4Decryption(step.keys?.get(0) ?: return@forEach, vrf)
+                "reverse" -> vrf = vrf.reversed()
+                "base64" -> vrf = Base64.UrlSafe.decode(vrf).toString(Charsets.UTF_8)
+                "else" -> {}
+            }
+        }
+        return URLDecoder.decode(vrf, "utf-8")
+    }
+
+    private fun rc4Encryption(key: String, input: String): String {
+        val rc4Key = SecretKeySpec(key.toByteArray(), "RC4")
+        val cipher = Cipher.getInstance("RC4")
+        cipher.init(Cipher.DECRYPT_MODE, rc4Key, cipher.parameters)
+        var output = cipher.doFinal(input.toByteArray())
+        output = Base64.UrlSafe.encode(output).toByteArray()
+        return output.toString(Charsets.UTF_8)
+    }
+
+    private fun rc4Decryption(key: String, input: String): String {
+        var vrf = input.toByteArray()
+        vrf = Base64.UrlSafe.decode(vrf)
+        val rc4Key = SecretKeySpec(key.toByteArray(), "RC4")
+        val cipher = Cipher.getInstance("RC4")
+        cipher.init(Cipher.DECRYPT_MODE, rc4Key, cipher.parameters)
+        vrf = cipher.doFinal(vrf)
+
+        return vrf.toString(Charsets.UTF_8)
+    }
+
+    private fun exchange(input: String, key1: String, key2: String): String {
+        return input.map { i ->
+            val index = key1.indexOf(i)
+            if (index != -1) {
+                key2[index]
+            } else {
+                i
+            }
+        }.joinToString("")
     }
 
     data class Tracks(
@@ -133,8 +178,6 @@ open class Vidplay : ExtractorApi() {
         @JsonProperty("tracks") val tracks: ArrayList<Tracks>? = arrayListOf(),
     )
 
-    data class Response(
-        @JsonProperty("result") val result: Result? = null,
-    )
+    data class Response(@JsonProperty("result") val result: String? = null)
 
 }

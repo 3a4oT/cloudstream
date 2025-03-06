@@ -6,7 +6,10 @@ import android.app.Activity
 import android.app.Activity.RESULT_CANCELED
 import android.app.NotificationChannel
 import android.app.NotificationManager
-import android.content.*
+import android.content.ContentValues
+import android.content.Context
+import android.content.DialogInterface
+import android.content.Intent
 import android.content.pm.PackageManager
 import android.database.Cursor
 import android.media.AudioAttributes
@@ -14,9 +17,14 @@ import android.media.AudioFocusRequest
 import android.media.AudioManager
 import android.media.tv.TvContract.Channels.COLUMN_INTERNAL_PROVIDER_ID
 import android.net.ConnectivityManager
+import android.net.Network
 import android.net.NetworkCapabilities
 import android.net.Uri
-import android.os.*
+import android.os.Build
+import android.os.Environment
+import android.os.Handler
+import android.os.Looper
+import android.os.ParcelFileDescriptor
 import android.provider.MediaStore
 import android.text.Spanned
 import android.util.Log
@@ -29,7 +37,6 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.annotation.RequiresApi
 import androidx.annotation.WorkerThread
 import androidx.appcompat.app.AlertDialog
-import androidx.core.content.ContextCompat
 import androidx.core.text.HtmlCompat
 import androidx.core.text.toSpanned
 import androidx.core.widget.ContentLoadingProgressBar
@@ -40,25 +47,35 @@ import androidx.preference.PreferenceManager
 import androidx.recyclerview.widget.DiffUtil
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
-import androidx.tvprovider.media.tv.*
+import androidx.tvprovider.media.tv.PreviewChannelHelper
+import androidx.tvprovider.media.tv.TvContractCompat
+import androidx.tvprovider.media.tv.WatchNextProgram
 import androidx.tvprovider.media.tv.WatchNextProgram.fromCursor
 import androidx.viewpager2.widget.ViewPager2
-import com.fasterxml.jackson.module.kotlin.readValue
 import com.google.android.gms.cast.framework.CastContext
 import com.google.android.gms.cast.framework.CastState
 import com.google.android.gms.common.ConnectionResult
 import com.google.android.gms.common.GoogleApiAvailability
 import com.google.android.gms.common.wrappers.Wrappers
 import com.google.android.material.bottomsheet.BottomSheetDialog
-import com.lagradost.cloudstream3.*
 import com.lagradost.cloudstream3.APIHolder.apis
+import com.lagradost.cloudstream3.AcraApplication.Companion.getActivity
+import com.lagradost.cloudstream3.AllLanguagesName
 import com.lagradost.cloudstream3.CommonActivity.activity
 import com.lagradost.cloudstream3.CommonActivity.showToast
+import com.lagradost.cloudstream3.DubStatus
+import com.lagradost.cloudstream3.HomePageList
+import com.lagradost.cloudstream3.LoadResponse
+import com.lagradost.cloudstream3.MainAPI
 import com.lagradost.cloudstream3.MainActivity.Companion.afterRepositoryLoadedEvent
+import com.lagradost.cloudstream3.R
+import com.lagradost.cloudstream3.SearchResponse
+import com.lagradost.cloudstream3.TvType
+import com.lagradost.cloudstream3.isMovieType
 import com.lagradost.cloudstream3.mvvm.logError
 import com.lagradost.cloudstream3.mvvm.normalSafeApiCall
 import com.lagradost.cloudstream3.plugins.RepositoryManager
-import com.lagradost.cloudstream3.syncproviders.AccountManager.Companion.appStringResumeWatching
+import com.lagradost.cloudstream3.syncproviders.AccountManager.Companion.APP_STRING_RESUME_WATCHING
 import com.lagradost.cloudstream3.syncproviders.providers.Kitsu
 import com.lagradost.cloudstream3.ui.WebviewFragment
 import com.lagradost.cloudstream3.ui.player.SubtitleData
@@ -76,9 +93,15 @@ import com.lagradost.cloudstream3.utils.UIHelper.navigate
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import okhttp3.Cache
-import java.io.*
+import java.io.File
+import java.io.FileNotFoundException
+import java.io.FileOutputStream
+import java.io.InputStream
+import java.io.OutputStream
 import java.net.URL
 import java.net.URLDecoder
+import java.util.concurrent.Executor
+import java.util.concurrent.Executors
 
 object AppContextUtils {
     fun RecyclerView.setMaxViewPoolSize(maxViewTypeId: Int, maxPoolSize: Int) {
@@ -105,7 +128,7 @@ object AppContextUtils {
         this?.window?.setWindowAnimations(-1)
         this?.show()
         Handler(Looper.getMainLooper()).postDelayed({
-            this?.window?.setWindowAnimations(R.style.Animation_Design_BottomSheetDialog)
+            this?.window?.setWindowAnimations(com.google.android.material.R.style.Animation_Design_BottomSheetDialog)
         }, 200)
     }
 
@@ -161,7 +184,7 @@ object AppContextUtils {
             .setTitle(title)
             .setPosterArtUri(Uri.parse(card.posterUrl))
             .setIntentUri(Uri.parse(card.id?.let {
-                "$appStringResumeWatching://$it"
+                "$APP_STRING_RESUME_WATCHING://$it"
             } ?: card.url))
             .setInternalProviderId(card.url)
             .setLastEngagementTimeUtcMillis(
@@ -646,7 +669,7 @@ object AppContextUtils {
         url: String,
         fallbackWebview: Boolean = false,
         fragment: Fragment? = null,
-    ) {
+    ) = (this.getActivity() ?: activity)?.runOnUiThread {
         try {
             val intent = Intent(Intent.ACTION_VIEW)
             intent.data = Uri.parse(url)
@@ -665,10 +688,7 @@ object AppContextUtils {
                         openWebView(fragment, url)
                     }
                 }.launch(intent)
-            } else {
-                ContextCompat.startActivity(this, intent, null)
-            }
-
+            } else this.startActivity(intent)
         } catch (e: Exception) {
             logError(e)
             if (fallbackWebview) {
@@ -678,9 +698,17 @@ object AppContextUtils {
     }
 
     fun Context.isNetworkAvailable(): Boolean {
-        val manager = this.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
-        val activeNetworkInfo = manager.activeNetworkInfo
-        return activeNetworkInfo != null && activeNetworkInfo.isConnected || manager.allNetworkInfo?.any { it.isConnected } ?: false
+        val connectivityManager =
+            getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            val network = connectivityManager.activeNetwork ?: return false
+            val networkCapabilities =
+                connectivityManager.getNetworkCapabilities(network) ?: return false
+            networkCapabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+        } else {
+            @Suppress("DEPRECATION")
+            connectivityManager.activeNetworkInfo?.isConnected == true
+        }
     }
 
     fun splitQuery(url: URL): Map<String, String> {
@@ -748,15 +776,17 @@ object AppContextUtils {
     fun loadResult(
         url: String,
         apiName: String,
+        name : String,
         startAction: Int = 0,
         startValue: Int = 0
     ) {
-        (activity as FragmentActivity?)?.loadResult(url, apiName, startAction, startValue)
+        (activity as FragmentActivity?)?.loadResult(url, apiName, name, startAction, startValue)
     }
 
     fun FragmentActivity.loadResult(
         url: String,
         apiName: String,
+        name : String,
         startAction: Int = 0,
         startValue: Int = 0
     ) {
@@ -772,7 +802,7 @@ object AppContextUtils {
             // viewModelStore.clear()
             this.navigate(
                 getResultsId(),
-                ResultFragment.newInstance(url, apiName, startAction, startValue)
+                ResultFragment.newInstance(url, apiName, name, startAction, startValue)
             )
         }
     }
@@ -801,12 +831,18 @@ object AppContextUtils {
     }
 
     fun Activity.requestLocalAudioFocus(focusRequest: AudioFocusRequest?) {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && focusRequest != null) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            if (focusRequest == null) {
+                Log.e("TAG", "focusRequest was null")
+                return
+            }
+
             val audioManager = getSystemService(Context.AUDIO_SERVICE) as AudioManager
             audioManager.requestAudioFocus(focusRequest)
         } else {
             val audioManager: AudioManager =
                 getSystemService(Context.AUDIO_SERVICE) as AudioManager
+            @Suppress("DEPRECATION")
             audioManager.requestAudioFocus(
                 null,
                 AudioManager.STREAM_MUSIC,
@@ -838,20 +874,26 @@ object AppContextUtils {
         val isCastApiAvailable =
             GoogleApiAvailability.getInstance()
                 .isGooglePlayServicesAvailable(applicationContext) == ConnectionResult.SUCCESS
+
         try {
-            applicationContext?.let { CastContext.getSharedInstance(it) }
+            applicationContext?.let {
+                val task = CastContext.getSharedInstance(it) { it.run() }
+                task.result
+            }
         } catch (e: Exception) {
             println(e)
-            // track non-fatal
+            // Track non-fatal
             return false
         }
+
         return isCastApiAvailable
     }
 
     fun Context.isConnectedToChromecast(): Boolean {
         if (isCastApiAvailable()) {
-            val castContext = CastContext.getSharedInstance(this)
-            if (castContext.castState == CastState.CONNECTED) {
+            val executor: Executor = Executors.newSingleThreadExecutor()
+            val castContext = CastContext.getSharedInstance(this, executor)
+            if (castContext.result.castState == CastState.CONNECTED) {
                 return true
             }
         }
@@ -964,16 +1006,16 @@ object AppContextUtils {
     }
 
     fun Context.isUsingMobileData(): Boolean {
-        val conManager = getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
-        val networkInfo = conManager.allNetworks
-        return networkInfo.any {
-            conManager.getNetworkCapabilities(it)
-                ?.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR) == true
-        } &&
-                !networkInfo.any {
-                    conManager.getNetworkCapabilities(it)
-                        ?.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) == true
-                }
+        val connectionManager = getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            val activeNetwork: Network? = connectionManager.activeNetwork
+            val networkCapabilities = connectionManager.getNetworkCapabilities(activeNetwork)
+            networkCapabilities?.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR) == true &&
+                    !networkCapabilities.hasTransport(NetworkCapabilities.TRANSPORT_WIFI)
+        } else {
+            @Suppress("DEPRECATION")
+            connectionManager.activeNetworkInfo?.type == ConnectivityManager.TYPE_MOBILE
+        }
     }
 
 
@@ -1014,9 +1056,7 @@ object AppContextUtils {
                 }
                 build()
             }
-        } else {
-            null
-        }
+        } else null
         return currentAudioFocusRequest
     }
 }
