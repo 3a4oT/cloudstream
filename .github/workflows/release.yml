@@ -6,7 +6,7 @@ on:
       - '*'
 
 env:
-  VERSIONED_NAME: cloudstream-bania-${{ github.ref_name }}
+  VERSIONED_NAME: cloudstream-UKR-${{ github.ref_name }}
 
 jobs:
   build:
@@ -47,7 +47,7 @@ jobs:
 
       - name: Rename APK
         run: |
-          mv app/build/outputs/apk/prerelease/release/app-release-unsigned.apk app/build/outputs/apk/prerelease/release/${{ env.VERSIONED_NAME }}.apk
+          mv app/build/outputs/apk/prerelease/release/app-prerelease-release-unsigned.apk app/build/outputs/apk/prerelease/release/${{ env.VERSIONED_NAME }}.apk
 
       - name: Align APK
         run: zipalign -v 4 app/build/outputs/apk/prerelease/release/${{ env.VERSIONED_NAME }}.apk app/build/outputs/apk/prerelease/release/${{ env.VERSIONED_NAME }}-aligned.apk
