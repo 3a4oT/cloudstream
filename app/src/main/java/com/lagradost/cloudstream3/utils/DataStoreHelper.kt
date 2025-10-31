@@ -15,6 +15,7 @@ import com.lagradost.cloudstream3.DubStatus
 import com.lagradost.cloudstream3.EpisodeResponse
 import com.lagradost.cloudstream3.MainActivity
 import com.lagradost.cloudstream3.R
+import com.lagradost.cloudstream3.Score
 import com.lagradost.cloudstream3.SearchQuality
 import com.lagradost.cloudstream3.SearchResponse
 import com.lagradost.cloudstream3.TvType
@@ -22,7 +23,10 @@ import com.lagradost.cloudstream3.syncproviders.AccountManager
 import com.lagradost.cloudstream3.syncproviders.SyncAPI
 import com.lagradost.cloudstream3.ui.WatchType
 import com.lagradost.cloudstream3.ui.library.ListSorting
+import com.lagradost.cloudstream3.ui.player.ExtractorUri
+import com.lagradost.cloudstream3.ui.player.NEXT_WATCH_EPISODE_PERCENTAGE
 import com.lagradost.cloudstream3.ui.result.EpisodeSortType
+import com.lagradost.cloudstream3.ui.result.ResultEpisode
 import com.lagradost.cloudstream3.ui.result.VideoWatchState
 import com.lagradost.cloudstream3.utils.AppContextUtils.filterProviderByPreferredMedia
 import java.util.Calendar
@@ -44,7 +48,7 @@ const val RESULT_EPISODE = "result_episode"
 const val RESULT_SEASON = "result_season"
 const val RESULT_DUB = "result_dub"
 const val KEY_RESULT_SORT = "result_sort"
-
+const val USER_PINNED_PROVIDERS = "user_pinned_providers" //key for pinned user set
 
 class UserPreferenceDelegate<T : Any>(
     private val key: String, private val default: T //, private val klass: KClass<T>
@@ -79,50 +83,64 @@ object DataStoreHelper {
         R.drawable.profile_bg_teal
     )
 
-    private var searchPreferenceProvidersStrings : List<String> by UserPreferenceDelegate(
+    private var searchPreferenceProvidersStrings: List<String> by UserPreferenceDelegate(
         /** java moment right here, as listOf()::class.java != List(0) { "" }::class.java */
         "search_pref_providers", List(0) { "" }
     )
 
-    private fun serializeTv(data : List<TvType>) : List<String> = data.map { it.name }
+    private fun serializeTv(data: List<TvType>): List<String> = data.map { it.name }
 
-    private fun deserializeTv(data : List<String>) : List<TvType> {
+    private fun deserializeTv(data: List<String>): List<TvType> {
         return data.mapNotNull { listName ->
             TvType.values().firstOrNull { it.name == listName }
         }
     }
 
-    var searchPreferenceProviders : List<String>
+    var searchPreferenceProviders: List<String>
         get() {
             val ret = searchPreferenceProvidersStrings
             return ret.ifEmpty {
                 context?.filterProviderByPreferredMedia()?.map { it.name } ?: emptyList()
             }
-        } set(value) {
+        }
+        set(value) {
             searchPreferenceProvidersStrings = value
         }
 
-    private var searchPreferenceTagsStrings : List<String> by UserPreferenceDelegate("search_pref_tags", listOf(TvType.Movie, TvType.TvSeries).map { it.name })
-    var searchPreferenceTags : List<TvType>
+    private var searchPreferenceTagsStrings: List<String> by UserPreferenceDelegate(
+        "search_pref_tags",
+        listOf(TvType.Movie, TvType.TvSeries).map { it.name })
+    var searchPreferenceTags: List<TvType>
         get() = deserializeTv(searchPreferenceTagsStrings)
         set(value) {
             searchPreferenceTagsStrings = serializeTv(value)
         }
 
 
-    private var homePreferenceStrings : List<String> by UserPreferenceDelegate("home_pref_homepage", listOf(TvType.Movie, TvType.TvSeries).map { it.name })
-    var homePreference : List<TvType>
+    private var homePreferenceStrings: List<String> by UserPreferenceDelegate(
+        "home_pref_homepage",
+        listOf(TvType.Movie, TvType.TvSeries).map { it.name })
+    var homePreference: List<TvType>
         get() = deserializeTv(homePreferenceStrings)
         set(value) {
             homePreferenceStrings = serializeTv(value)
         }
 
-    var homeBookmarkedList : IntArray by UserPreferenceDelegate("home_bookmarked_last_list", IntArray(0))
-    var playBackSpeed : Float by UserPreferenceDelegate("playback_speed", 1.0f)
-    var resizeMode : Int by UserPreferenceDelegate("resize_mode", 0)
-    var librarySortingMode : Int by UserPreferenceDelegate("library_sorting_mode", ListSorting.AlphabeticalA.ordinal)
-    private var _resultsSortingMode : Int by UserPreferenceDelegate("results_sorting_mode", EpisodeSortType.NUMBER_ASC.ordinal)
-    var resultsSortingMode : EpisodeSortType
+    var homeBookmarkedList: IntArray by UserPreferenceDelegate(
+        "home_bookmarked_last_list",
+        IntArray(0)
+    )
+    var playBackSpeed: Float by UserPreferenceDelegate("playback_speed", 1.0f)
+    var resizeMode: Int by UserPreferenceDelegate("resize_mode", 0)
+    var librarySortingMode: Int by UserPreferenceDelegate(
+        "library_sorting_mode",
+        ListSorting.AlphabeticalA.ordinal
+    )
+    private var _resultsSortingMode: Int by UserPreferenceDelegate(
+        "results_sorting_mode",
+        EpisodeSortType.NUMBER_ASC.ordinal
+    )
+    var resultsSortingMode: EpisodeSortType
         get() = EpisodeSortType.entries.getOrNull(_resultsSortingMode) ?: EpisodeSortType.NUMBER_ASC
         set(value) {
             _resultsSortingMode = value.ordinal
@@ -140,7 +158,10 @@ object DataStoreHelper {
         @JsonProperty("lockPin")
         val lockPin: String? = null,
     ) {
-        val image get() = customImage?.let { UiImage.Image(it) } ?: profileImages.getOrNull(defaultImageIndex)?.let { UiImage.Drawable(it) } ?: UiImage.Drawable(profileImages.first())
+        val image
+            get() = customImage?.let { UiImage.Image(it) } ?: profileImages.getOrNull(
+                defaultImageIndex
+            )?.let { UiImage.Drawable(it) } ?: UiImage.Drawable(profileImages.first())
     }
 
     const val TAG = "data_store_helper"
@@ -167,6 +188,7 @@ object DataStoreHelper {
         val homepage = currentHomePage
 
         selectedKeyIndex = account.keyIndex
+        AccountManager.updateAccountIds()
         showToast(context?.getString(R.string.logged_account, account.name) ?: account.name)
         MainActivity.bookmarksUpdatedEvent(true)
         MainActivity.reloadLibraryEvent(true)
@@ -222,7 +244,8 @@ object DataStoreHelper {
         return this
     }
 
-    fun Int.toYear() : Date = GregorianCalendar.getInstance().also { it.set(Calendar.YEAR, this) }.time
+    fun Int.toYear(): Date =
+        GregorianCalendar.getInstance().also { it.set(Calendar.YEAR, this) }.time
 
     /**
      * Used to display notifications on new episodes and posters in library.
@@ -239,10 +262,24 @@ object DataStoreHelper {
         @JsonProperty("syncData") open val syncData: Map<String, String>?,
         @JsonProperty("quality") override var quality: SearchQuality?,
         @JsonProperty("posterHeaders") override var posterHeaders: Map<String, String>?,
-        @JsonProperty("plot") open val plot : String? = null,
-        @JsonProperty("rating") open val rating : Int? = null,
-        @JsonProperty("tags") open val tags : List<String>? = null,
-    ) : SearchResponse
+        @JsonProperty("plot") open val plot: String? = null,
+        @JsonProperty("score") override var score: Score? = null,
+        @JsonProperty("tags") open val tags: List<String>? = null,
+    ) : SearchResponse {
+        @JsonProperty("rating", access = JsonProperty.Access.WRITE_ONLY)
+        @Deprecated(
+            "`rating` is the old scoring system, use score instead",
+            replaceWith = ReplaceWith("score"),
+            level = DeprecationLevel.ERROR
+        )
+        var rating: Int? = null
+            set(value) {
+                if (value != null) {
+                    @Suppress("DEPRECATION_ERROR")
+                    score = Score.fromOld(value)
+                }
+            }
+    }
 
     data class SubscribedData(
         @JsonProperty("subscribedTime") val subscribedTime: Long,
@@ -259,9 +296,24 @@ object DataStoreHelper {
         override var quality: SearchQuality? = null,
         override var posterHeaders: Map<String, String>? = null,
         override val plot: String? = null,
-        override val rating: Int? = null,
+        override var score: Score? = null,
         override val tags: List<String>? = null,
-    ) : LibrarySearchResponse(id, latestUpdatedTime, name, url, apiName, type, posterUrl, year, syncData, quality, posterHeaders, plot,rating,tags) {
+    ) : LibrarySearchResponse(
+        id,
+        latestUpdatedTime,
+        name,
+        url,
+        apiName,
+        type,
+        posterUrl,
+        year,
+        syncData,
+        quality,
+        posterHeaders,
+        plot,
+        score,
+        tags
+    ) {
         fun toLibraryItem(): SyncAPI.LibraryItem? {
             return SyncAPI.LibraryItem(
                 name,
@@ -271,7 +323,16 @@ object DataStoreHelper {
                 null,
                 null,
                 latestUpdatedTime,
-                apiName, type, posterUrl, posterHeaders, quality, year?.toYear(), this.id, plot = this.plot, rating = this.rating, tags = this.tags
+                apiName,
+                type,
+                posterUrl,
+                posterHeaders,
+                quality,
+                year?.toYear(),
+                this.id,
+                plot = this.plot,
+                score = this.score,
+                tags = this.tags
             )
         }
     }
@@ -290,9 +351,22 @@ object DataStoreHelper {
         override var quality: SearchQuality? = null,
         override var posterHeaders: Map<String, String>? = null,
         override val plot: String? = null,
-        override val rating: Int? = null,
+        override var score: Score? = null,
         override val tags: List<String>? = null,
-    ) : LibrarySearchResponse(id, latestUpdatedTime, name, url, apiName, type, posterUrl, year, syncData, quality, posterHeaders, plot) {
+    ) : LibrarySearchResponse(
+        id,
+        latestUpdatedTime,
+        name,
+        url,
+        apiName,
+        type,
+        posterUrl,
+        year,
+        syncData,
+        quality,
+        posterHeaders,
+        plot
+    ) {
         fun toLibraryItem(id: String): SyncAPI.LibraryItem {
             return SyncAPI.LibraryItem(
                 name,
@@ -302,7 +376,16 @@ object DataStoreHelper {
                 null,
                 null,
                 latestUpdatedTime,
-                apiName, type, posterUrl, posterHeaders, quality, year?.toYear(), this.id, plot = this.plot, rating = this.rating, tags = this.tags
+                apiName,
+                type,
+                posterUrl,
+                posterHeaders,
+                quality,
+                year?.toYear(),
+                this.id,
+                plot = this.plot,
+                score = this.score,
+                tags = this.tags
             )
         }
     }
@@ -321,9 +404,22 @@ object DataStoreHelper {
         override var quality: SearchQuality? = null,
         override var posterHeaders: Map<String, String>? = null,
         override val plot: String? = null,
-        override val rating: Int? = null,
+        override var score: Score? = null,
         override val tags: List<String>? = null,
-    ) : LibrarySearchResponse(id, latestUpdatedTime, name, url, apiName, type, posterUrl, year, syncData, quality, posterHeaders,plot) {
+    ) : LibrarySearchResponse(
+        id,
+        latestUpdatedTime,
+        name,
+        url,
+        apiName,
+        type,
+        posterUrl,
+        year,
+        syncData,
+        quality,
+        posterHeaders,
+        plot
+    ) {
         fun toLibraryItem(): SyncAPI.LibraryItem? {
             return SyncAPI.LibraryItem(
                 name,
@@ -333,7 +429,16 @@ object DataStoreHelper {
                 null,
                 null,
                 latestUpdatedTime,
-                apiName, type, posterUrl, posterHeaders, quality, year?.toYear(), this.id, plot = this.plot, rating = this.rating, tags = this.tags
+                apiName,
+                type,
+                posterUrl,
+                posterHeaders,
+                quality,
+                year?.toYear(),
+                this.id,
+                plot = this.plot,
+                score = this.score,
+                tags = this.tags
             )
         }
     }
@@ -352,6 +457,7 @@ object DataStoreHelper {
         @JsonProperty("isFromDownload") val isFromDownload: Boolean,
         @JsonProperty("quality") override var quality: SearchQuality? = null,
         @JsonProperty("posterHeaders") override var posterHeaders: Map<String, String>? = null,
+        @JsonProperty("score") override var score: Score? = null,
     ) : SearchResponse
 
     /**
@@ -540,6 +646,62 @@ object DataStoreHelper {
         setKey("$currentAccount/$VIDEO_POS_DUR", id.toString(), PosDur(pos, dur))
     }
 
+    /** Sets the position, duration, and resume data of an episode/movie,
+     *
+     * if nextEpisode is not specified it will not be able to set the next episode as resumable if progress > NEXT_WATCH_EPISODE_PERCENTAGE
+     * */
+    fun setViewPosAndResume(id: Int?, position: Long, duration: Long, currentEpisode: Any?, nextEpisode: Any?) {
+        setViewPos(id, position, duration)
+        if (id != null) {
+            when (val meta = currentEpisode) {
+                is ResultEpisode -> {
+                    if (meta.videoWatchState == VideoWatchState.Watched) {
+                        setVideoWatchState(id, VideoWatchState.None)
+                    }
+                }
+            }
+        }
+
+        val percentage = position * 100L / duration
+        val nextEp = percentage >= NEXT_WATCH_EPISODE_PERCENTAGE
+        val resumeMeta = if (nextEp) nextEpisode else currentEpisode
+        if (resumeMeta == null && nextEp) {
+            // remove last watched as it is the last episode and you have watched too much
+            when (val newMeta = currentEpisode) {
+                is ResultEpisode -> {
+                    removeLastWatched(newMeta.parentId)
+                }
+
+                is ExtractorUri -> {
+                    removeLastWatched(newMeta.parentId)
+                }
+            }
+        } else {
+            // save resume
+            when (resumeMeta) {
+                is ResultEpisode -> {
+                    setLastWatched(
+                        resumeMeta.parentId,
+                        resumeMeta.id,
+                        resumeMeta.episode,
+                        resumeMeta.season,
+                        isFromDownload = false
+                    )
+                }
+
+                is ExtractorUri -> {
+                    setLastWatched(
+                        resumeMeta.parentId,
+                        resumeMeta.id,
+                        resumeMeta.episode,
+                        resumeMeta.season,
+                        isFromDownload = true
+                    )
+                }
+            }
+        }
+    }
+
     fun getViewPos(id: Int?): PosDur? {
         if (id == null) return null
         return getKey("$currentAccount/$VIDEO_POS_DUR", id.toString(), null)
@@ -562,7 +724,7 @@ object DataStoreHelper {
     }
 
     fun getDub(id: Int): DubStatus? {
-        return DubStatus.values()
+        return DubStatus.entries
             .getOrNull(getKey("$currentAccount/$RESULT_DUB", id.toString(), -1) ?: -1)
     }
 
@@ -614,4 +776,9 @@ object DataStoreHelper {
             getKey("${idPrefix}_sync", id.toString())
         }
     }
+
+    var pinnedProviders: Array<String>
+        get() = getKey(USER_PINNED_PROVIDERS) ?: emptyArray<String>()
+        set(value) = setKey(USER_PINNED_PROVIDERS, value)
+
 }

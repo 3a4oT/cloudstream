@@ -6,7 +6,6 @@ import android.app.Activity
 import android.app.Activity.RESULT_CANCELED
 import android.app.NotificationChannel
 import android.app.NotificationManager
-import android.content.ContentValues
 import android.content.Context
 import android.content.DialogInterface
 import android.content.Intent
@@ -21,11 +20,8 @@ import android.net.Network
 import android.net.NetworkCapabilities
 import android.net.Uri
 import android.os.Build
-import android.os.Environment
 import android.os.Handler
 import android.os.Looper
-import android.os.ParcelFileDescriptor
-import android.provider.MediaStore
 import android.text.Spanned
 import android.util.Log
 import android.view.View
@@ -73,7 +69,7 @@ import com.lagradost.cloudstream3.SearchResponse
 import com.lagradost.cloudstream3.TvType
 import com.lagradost.cloudstream3.isMovieType
 import com.lagradost.cloudstream3.mvvm.logError
-import com.lagradost.cloudstream3.mvvm.normalSafeApiCall
+import com.lagradost.cloudstream3.mvvm.safe
 import com.lagradost.cloudstream3.plugins.RepositoryManager
 import com.lagradost.cloudstream3.syncproviders.AccountManager.Companion.APP_STRING_RESUME_WATCHING
 import com.lagradost.cloudstream3.syncproviders.providers.Kitsu
@@ -94,21 +90,13 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import okhttp3.Cache
 import java.io.File
-import java.io.FileNotFoundException
-import java.io.FileOutputStream
-import java.io.InputStream
-import java.io.OutputStream
 import java.net.URL
 import java.net.URLDecoder
 import java.util.concurrent.Executor
 import java.util.concurrent.Executors
 
-object AppContextUtils {
-    fun RecyclerView.setMaxViewPoolSize(maxViewTypeId: Int, maxPoolSize: Int) {
-        for (i in 0..maxViewTypeId)
-            recycledViewPool.setMaxRecycledViews(i, maxPoolSize)
-    }
 
+object AppContextUtils {
     fun RecyclerView.isRecyclerScrollable(): Boolean {
         val layoutManager =
             this.layoutManager as? LinearLayoutManager?
@@ -134,9 +122,9 @@ object AppContextUtils {
 
     //fun Context.deleteFavorite(data: SearchResponse) {
     //    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
-    //    normalSafeApiCall {
+    //    safe {
     //        val existingId =
-    //            getWatchNextProgramByVideoId(data.url, this).second ?: return@normalSafeApiCall
+    //            getWatchNextProgramByVideoId(data.url, this).second ?: return@safe
     //        contentResolver.delete(
 //
     //            TvContractCompat.buildWatchNextProgramUri(existingId),
@@ -159,7 +147,7 @@ object AppContextUtils {
             text.toSpanned()
         }
     }
-
+    /** Get channel ID by name */
     @SuppressLint("RestrictedApi")
     private fun buildWatchNextProgramUri(
         context: Context,
@@ -376,25 +364,6 @@ object AppContextUtils {
         }
     }
 
-    @SuppressLint("Range")
-    fun getVideoContentUri(context: Context, videoFilePath: String): Uri? {
-        val cursor = context.contentResolver.query(
-            MediaStore.Video.Media.EXTERNAL_CONTENT_URI, arrayOf(MediaStore.Video.Media._ID),
-            MediaStore.Video.Media.DATA + "=? ", arrayOf(videoFilePath), null
-        )
-        return if (cursor != null && cursor.moveToFirst()) {
-            val id = cursor.getInt(cursor.getColumnIndex(MediaStore.MediaColumns._ID))
-            cursor.close()
-            Uri.withAppendedPath(MediaStore.Video.Media.EXTERNAL_CONTENT_URI, "" + id)
-        } else {
-            val values = ContentValues()
-            values.put(MediaStore.Video.Media.DATA, videoFilePath)
-            context.contentResolver.insert(
-                MediaStore.Video.Media.EXTERNAL_CONTENT_URI, values
-            )
-        }
-    }
-
     fun sortSubs(subs: Set<SubtitleData>): List<SubtitleData> {
         return subs.sortedBy { it.name }
     }
@@ -562,6 +531,7 @@ object AppContextUtils {
             val repo = RepositoryManager.parseRepository(url) ?: return@ioSafe
             RepositoryManager.addRepository(
                 RepositoryData(
+                    repo.iconUrl ?: "",
                     repo.name,
                     url
                 )
@@ -574,45 +544,6 @@ object AppContextUtils {
             }
             afterRepositoryLoadedEvent.invoke(true)
             addRepositoryDialog(repo.name, url)
-        }
-    }
-
-    abstract class DiffAdapter<T>(
-        open val items: MutableList<T>,
-        val comparison: (first: T, second: T) -> Boolean = { first, second ->
-            first.hashCode() == second.hashCode()
-        }
-    ) :
-        RecyclerView.Adapter<RecyclerView.ViewHolder>() {
-        override fun getItemCount(): Int {
-            return items.size
-        }
-
-        fun updateList(newList: List<T>) {
-            val diffResult = DiffUtil.calculateDiff(
-                GenericDiffCallback(this.items, newList)
-            )
-
-            items.clear()
-            items.addAll(newList)
-
-            diffResult.dispatchUpdatesTo(this)
-        }
-
-        inner class GenericDiffCallback(
-            private val oldList: List<T>,
-            private val newList: List<T>
-        ) :
-            DiffUtil.Callback() {
-            override fun areItemsTheSame(oldItemPosition: Int, newItemPosition: Int) =
-                comparison(oldList[oldItemPosition], newList[newItemPosition])
-
-            override fun getOldListSize() = oldList.size
-
-            override fun getNewListSize() = newList.size
-
-            override fun areContentsTheSame(oldItemPosition: Int, newItemPosition: Int) =
-                oldList[oldItemPosition] == newList[newItemPosition]
         }
     }
 
@@ -655,7 +586,7 @@ object AppContextUtils {
 
     fun openWebView(fragment: Fragment?, url: String) {
         if (fragment?.context?.hasWebView() == true)
-            normalSafeApiCall {
+            safe {
                 fragment
                     .findNavController()
                     .navigate(R.id.navigation_webview, WebviewFragment.newInstance(url))
@@ -909,100 +840,6 @@ object AppContextUtils {
             isFocusableInTouchMode = true
             requestFocus()
         }
-    }
-
-    // Copied from https://github.com/videolan/vlc-android/blob/master/application/vlc-android/src/org/videolan/vlc/util/FileUtils.kt
-    @SuppressLint("Range")
-    fun Context.getUri(data: Uri?): Uri? {
-        var uri = data
-        val ctx = this
-        if (data != null && data.scheme == "content") {
-            // Mail-based apps - download the stream to a temporary file and play it
-            if ("com.fsck.k9.attachmentprovider" == data.host || "gmail-ls" == data.host) {
-                var inputStream: InputStream? = null
-                var os: OutputStream? = null
-                var cursor: Cursor? = null
-                try {
-                    cursor = ctx.contentResolver.query(
-                        data,
-                        arrayOf(MediaStore.MediaColumns.DISPLAY_NAME), null, null, null
-                    )
-                    if (cursor != null && cursor.moveToFirst()) {
-                        val filename =
-                            cursor.getString(cursor.getColumnIndex(MediaStore.MediaColumns.DISPLAY_NAME))
-                                .replace("/", "")
-                        inputStream = ctx.contentResolver.openInputStream(data)
-                        if (inputStream == null) return data
-                        os =
-                            FileOutputStream(Environment.getExternalStorageDirectory().path + "/Download/" + filename)
-                        val buffer = ByteArray(1024)
-                        var bytesRead = inputStream.read(buffer)
-                        while (bytesRead >= 0) {
-                            os.write(buffer, 0, bytesRead)
-                            bytesRead = inputStream.read(buffer)
-                        }
-                        uri =
-                            Uri.fromFile(File(Environment.getExternalStorageDirectory().path + "/Download/" + filename))
-                    }
-                } catch (e: Exception) {
-                    return null
-                } finally {
-                    inputStream?.close()
-                    os?.close()
-                    cursor?.close()
-                }
-            } else if (data.authority == "media") {
-                uri = this.contentResolver.query(
-                    data,
-                    arrayOf(MediaStore.Video.Media.DATA), null, null, null
-                )?.use {
-                    val columnIndex = it.getColumnIndexOrThrow(MediaStore.Video.Media.DATA)
-                    if (it.moveToFirst()) Uri.fromFile(File(it.getString(columnIndex)))
-                        ?: data else data
-                }
-                //uri = MediaUtils.getContentMediaUri(data)
-                /*} else if (data.authority == ctx.getString(R.string.tv_provider_authority)) {
-                    println("TV AUTHORITY")
-                    //val medialibrary = Medialibrary.getInstance()
-                    //val media = medialibrary.getMedia(data.lastPathSegment!!.toLong())
-                    uri = null//media.uri*/
-            } else {
-                val inputPFD: ParcelFileDescriptor?
-                try {
-                    inputPFD = ctx.contentResolver.openFileDescriptor(data, "r")
-                    if (inputPFD == null) return data
-                    uri = Uri.parse("fd://" + inputPFD.fd)
-                    //                    Cursor returnCursor =
-                    //                            getContentResolver().query(data, null, null, null, null);
-                    //                    if (returnCursor != null) {
-                    //                        if (returnCursor.getCount() > 0) {
-                    //                            int nameIndex = returnCursor.getColumnIndex(OpenableColumns.DISPLAY_NAME);
-                    //                            if (nameIndex > -1) {
-                    //                                returnCursor.moveToFirst();
-                    //                                title = returnCursor.getString(nameIndex);
-                    //                            }
-                    //                        }
-                    //                        returnCursor.close();
-                    //                    }
-                } catch (e: FileNotFoundException) {
-                    Log.e("TAG", "${e.message} for $data", e)
-                    return null
-                } catch (e: IllegalArgumentException) {
-                    Log.e("TAG", "${e.message} for $data", e)
-                    return null
-                } catch (e: IllegalStateException) {
-                    Log.e("TAG", "${e.message} for $data", e)
-                    return null
-                } catch (e: NullPointerException) {
-                    Log.e("TAG", "${e.message} for $data", e)
-                    return null
-                } catch (e: SecurityException) {
-                    Log.e("TAG", "${e.message} for $data", e)
-                    return null
-                }
-            }// Media or MMS URI
-        }
-        return uri
     }
 
     fun Context.isUsingMobileData(): Boolean {

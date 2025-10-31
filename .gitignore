@@ -1,5 +1,3 @@
-*.iml
-.gradle
 /local.properties
 /.idea/caches
 /.idea/artifacts
@@ -12,8 +10,18 @@
 .DS_Store
 /build
 /captures
-.externalNativeBuild
 .cxx
+.kotlin/*
+
+# Created by https://www.toptal.com/developers/gitignore/api/kotlin,java,android,androidstudio,visualstudiocode
+# Edit at https://www.toptal.com/developers/gitignore?templates=kotlin,java,android,androidstudio,visualstudiocode
+
+### Android ###
+# Gradle files
+.gradle/
+build/
+
+# Local configuration file (sdk path, etc)
 local.properties
 
 # Built application files

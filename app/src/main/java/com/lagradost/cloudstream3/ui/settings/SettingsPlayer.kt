@@ -3,11 +3,11 @@ package com.lagradost.cloudstream3.ui.settings
 import android.os.Bundle
 import android.text.format.Formatter.formatShortFileSize
 import android.view.View
-import androidx.preference.PreferenceFragmentCompat
 import androidx.preference.PreferenceManager
 import com.lagradost.cloudstream3.R
 import com.lagradost.cloudstream3.actions.VideoClickActionHolder
 import com.lagradost.cloudstream3.mvvm.logError
+import com.lagradost.cloudstream3.ui.BasePreferenceFragmentCompat
 import com.lagradost.cloudstream3.ui.settings.Globals.EMULATOR
 import com.lagradost.cloudstream3.ui.settings.Globals.PHONE
 import com.lagradost.cloudstream3.ui.settings.Globals.TV
@@ -25,7 +25,7 @@ import com.lagradost.cloudstream3.utils.SingleSelectionHelper.showBottomDialog
 import com.lagradost.cloudstream3.utils.SingleSelectionHelper.showDialog
 import com.lagradost.cloudstream3.utils.UIHelper.hideKeyboard
 
-class SettingsPlayer : PreferenceFragmentCompat() {
+class SettingsPlayer : BasePreferenceFragmentCompat() {
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         super.onViewCreated(view, savedInstanceState)
         setUpToolbar(R.string.category_player)
@@ -42,7 +42,8 @@ class SettingsPlayer : PreferenceFragmentCompat() {
             listOf(
                 R.string.pref_category_gestures_key,
                 R.string.rotate_video_key,
-                R.string.auto_rotate_video_key
+                R.string.auto_rotate_video_key,
+                R.string.speedup_key
             ),
             TV or EMULATOR
         )

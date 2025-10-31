@@ -9,13 +9,14 @@ import com.lagradost.cloudstream3.LoadResponse
 import com.lagradost.cloudstream3.MainAPI
 import com.lagradost.cloudstream3.MainActivity.Companion.afterPluginsLoadedEvent
 import com.lagradost.cloudstream3.MainPageRequest
-import com.lagradost.cloudstream3.SearchResponse
+import com.lagradost.cloudstream3.SearchResponseList
 import com.lagradost.cloudstream3.SubtitleFile
 import com.lagradost.cloudstream3.TvType
 import com.lagradost.cloudstream3.fixUrl
 import com.lagradost.cloudstream3.mvvm.Resource
 import com.lagradost.cloudstream3.mvvm.logError
 import com.lagradost.cloudstream3.mvvm.safeApiCall
+import com.lagradost.cloudstream3.newSearchResponseList
 import com.lagradost.cloudstream3.utils.Coroutines.threadSafeListOf
 import com.lagradost.cloudstream3.utils.ExtractorLink
 import kotlinx.coroutines.CoroutineScope
@@ -27,8 +28,10 @@ class APIRepository(val api: MainAPI) {
     companion object {
         // 2 minute timeout to prevent bad extensions/extractors from hogging the resources
         // No real provider should take longer, so we hard kill them.
-        // If you have a real reason why this is too short, create a PR to change this constant or add a field for it in MainAPI
-        const val DEFAULT_TIMEOUT = 120_000L
+        private const val DEFAULT_TIMEOUT = 120_000L
+        private const val MAX_TIMEOUT = 4 * DEFAULT_TIMEOUT
+        private const val MIN_TIMEOUT = 5_000L
+
         var dubStatusActive = HashSet<DubStatus>()
 
         val noneApi = object : MainAPI() {
@@ -55,6 +58,10 @@ class APIRepository(val api: MainAPI) {
         private val cache = threadSafeListOf<SavedLoadResponse>()
         private var cacheIndex: Int = 0
         const val CACHE_SIZE = 20
+
+        fun getTimeout(desired: Long?): Long {
+            return (desired ?: DEFAULT_TIMEOUT).coerceIn(MIN_TIMEOUT, MAX_TIMEOUT)
+        }
     }
 
     private fun afterPluginsLoaded(forceReload: Boolean) {
@@ -79,7 +86,7 @@ class APIRepository(val api: MainAPI) {
 
     suspend fun load(url: String): Resource<LoadResponse> {
         return safeApiCall {
-            withTimeout(DEFAULT_TIMEOUT) {
+            withTimeout(getTimeout(api.loadTimeoutMs)) {
                 if (isInvalidData(url)) throw ErrorLoadingException()
                 val fixedUrl = api.fixUrl(url)
                 val lookingForHash = Pair(api.name, fixedUrl)
@@ -111,27 +118,29 @@ class APIRepository(val api: MainAPI) {
         }
     }
 
-    suspend fun search(query: String): Resource<List<SearchResponse>> {
+    suspend fun search(query: String, page: Int): Resource<SearchResponseList> {
         if (query.isEmpty())
-            return Resource.Success(emptyList())
+            return Resource.Success(newSearchResponseList(emptyList()))
 
         return safeApiCall {
-            withTimeout(DEFAULT_TIMEOUT) {
-                (api.search(query)
+            withTimeout(getTimeout(api.searchTimeoutMs)) {
+                (api.search(query, page)
                     ?: throw ErrorLoadingException())
-            //                .filter { typesActive.contains(it.type) }
-                    .toList()
+                //                .filter { typesActive.contains(it.type) }
             }
         }
     }
 
-    suspend fun quickSearch(query: String): Resource<List<SearchResponse>> {
+    suspend fun quickSearch(query: String): Resource<SearchResponseList> {
         if (query.isEmpty())
-            return Resource.Success(emptyList())
+            return Resource.Success(newSearchResponseList(emptyList()))
 
         return safeApiCall {
-            withTimeout(DEFAULT_TIMEOUT) {
-                api.quickSearch(query) ?: throw ErrorLoadingException()
+            withTimeout(getTimeout(api.quickSearchTimeoutMs)) {
+                newSearchResponseList(
+                    api.quickSearch(query) ?: throw ErrorLoadingException(),
+                    false
+                )
             }
         }
     }
@@ -144,7 +153,7 @@ class APIRepository(val api: MainAPI) {
 
     suspend fun getMainPage(page: Int, nameIndex: Int? = null): Resource<List<HomePageResponse?>> {
         return safeApiCall {
-            withTimeout(DEFAULT_TIMEOUT) {
+            withTimeout(getTimeout(api.getMainPageTimeoutMs)) {
                 api.lastHomepageRequest = unixTimeMS
 
                 nameIndex?.let { api.mainPage.getOrNull(it) }?.let { data ->
@@ -198,7 +207,7 @@ class APIRepository(val api: MainAPI) {
     ): Boolean {
         if (isInvalidData(data)) return false // this makes providers cleaner
         return try {
-            withTimeout(DEFAULT_TIMEOUT) {
+            withTimeout(getTimeout(api.loadLinksTimeoutMs)) {
                 api.loadLinks(data, isCasting, subtitleCallback, callback)
             }
         } catch (throwable: Throwable) {

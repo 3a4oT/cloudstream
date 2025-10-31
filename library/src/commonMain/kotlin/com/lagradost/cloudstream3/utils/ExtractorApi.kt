@@ -16,6 +16,9 @@ import com.lagradost.cloudstream3.extractors.Asnwish
 import com.lagradost.cloudstream3.extractors.Awish
 import com.lagradost.cloudstream3.extractors.Beastx
 import com.lagradost.cloudstream3.extractors.Bestx
+import com.lagradost.cloudstream3.extractors.BgwpCC
+import com.lagradost.cloudstream3.extractors.BigwarpArt
+import com.lagradost.cloudstream3.extractors.BigwarpIO
 import com.lagradost.cloudstream3.extractors.Blogger
 import com.lagradost.cloudstream3.extractors.Boltx
 import com.lagradost.cloudstream3.extractors.Boosterx
@@ -27,7 +30,9 @@ import com.lagradost.cloudstream3.extractors.CdnwishCom
 import com.lagradost.cloudstream3.extractors.Chillx
 import com.lagradost.cloudstream3.extractors.CineGrabber
 import com.lagradost.cloudstream3.extractors.Cinestart
+import com.lagradost.cloudstream3.extractors.CloudMailRu
 import com.lagradost.cloudstream3.extractors.ContentX
+import com.lagradost.cloudstream3.extractors.CsstOnline
 import com.lagradost.cloudstream3.extractors.D0000d
 import com.lagradost.cloudstream3.extractors.D000dCom
 import com.lagradost.cloudstream3.extractors.DBfilm
@@ -38,6 +43,8 @@ import com.lagradost.cloudstream3.extractors.DesuArcg
 import com.lagradost.cloudstream3.extractors.DesuDrive
 import com.lagradost.cloudstream3.extractors.DesuOdchan
 import com.lagradost.cloudstream3.extractors.DesuOdvip
+import com.lagradost.cloudstream3.extractors.Dhcplay
+import com.lagradost.cloudstream3.extractors.Dhtpre
 import com.lagradost.cloudstream3.extractors.Dokicloud
 import com.lagradost.cloudstream3.extractors.DoodCxExtractor
 import com.lagradost.cloudstream3.extractors.DoodLaExtractor
@@ -54,6 +61,7 @@ import com.lagradost.cloudstream3.extractors.DoodstreamCom
 import com.lagradost.cloudstream3.extractors.Dooood
 import com.lagradost.cloudstream3.extractors.Ds2play
 import com.lagradost.cloudstream3.extractors.Ds2video
+import com.lagradost.cloudstream3.extractors.DsstOnline
 import com.lagradost.cloudstream3.extractors.Dwish
 import com.lagradost.cloudstream3.extractors.EPlayExtractor
 import com.lagradost.cloudstream3.extractors.Embedgram
@@ -66,9 +74,7 @@ import com.lagradost.cloudstream3.extractors.FEnet
 import com.lagradost.cloudstream3.extractors.Fastream
 import com.lagradost.cloudstream3.extractors.FeHD
 import com.lagradost.cloudstream3.extractors.Fembed9hd
-import com.lagradost.cloudstream3.extractors.FileMoon
 import com.lagradost.cloudstream3.extractors.FileMoonIn
-import com.lagradost.cloudstream3.extractors.FileMoonSx
 import com.lagradost.cloudstream3.extractors.Filegram
 import com.lagradost.cloudstream3.extractors.Filesim
 import com.lagradost.cloudstream3.extractors.FlaswishCom
@@ -76,6 +82,8 @@ import com.lagradost.cloudstream3.extractors.FourCX
 import com.lagradost.cloudstream3.extractors.FourPichive
 import com.lagradost.cloudstream3.extractors.FourPlayRu
 import com.lagradost.cloudstream3.extractors.Fplayer
+import com.lagradost.cloudstream3.extractors.FsstOnline
+import com.lagradost.cloudstream3.extractors.GDMirrorbot
 import com.lagradost.cloudstream3.extractors.GMPlayer
 import com.lagradost.cloudstream3.extractors.GamoVideo
 import com.lagradost.cloudstream3.extractors.Gdriveplayer
@@ -111,6 +119,7 @@ import com.lagradost.cloudstream3.extractors.Krakenfiles
 import com.lagradost.cloudstream3.extractors.Kswplayer
 import com.lagradost.cloudstream3.extractors.LayarKaca
 import com.lagradost.cloudstream3.extractors.Linkbox
+import com.lagradost.cloudstream3.extractors.LuluStream
 import com.lagradost.cloudstream3.extractors.Lulustream1
 import com.lagradost.cloudstream3.extractors.Lulustream2
 import com.lagradost.cloudstream3.extractors.Luxubu
@@ -140,6 +149,7 @@ import com.lagradost.cloudstream3.extractors.Mvidoo
 import com.lagradost.cloudstream3.extractors.Mwish
 import com.lagradost.cloudstream3.extractors.MwvnVizcloudInfo
 import com.lagradost.cloudstream3.extractors.MyCloud
+import com.lagradost.cloudstream3.extractors.NathanFromSubject
 import com.lagradost.cloudstream3.extractors.Nekostream
 import com.lagradost.cloudstream3.extractors.Nekowish
 import com.lagradost.cloudstream3.extractors.Neonime7n
@@ -150,6 +160,7 @@ import com.lagradost.cloudstream3.extractors.OkRuHTTP
 import com.lagradost.cloudstream3.extractors.OkRuSSL
 import com.lagradost.cloudstream3.extractors.Okrulink
 import com.lagradost.cloudstream3.extractors.PeaceMakerst
+import com.lagradost.cloudstream3.extractors.Peytonepre
 import com.lagradost.cloudstream3.extractors.Pichive
 import com.lagradost.cloudstream3.extractors.PixelDrain
 import com.lagradost.cloudstream3.extractors.PlayLtXyz
@@ -171,11 +182,14 @@ import com.lagradost.cloudstream3.extractors.Sbrapid
 import com.lagradost.cloudstream3.extractors.Sbsonic
 import com.lagradost.cloudstream3.extractors.Sbspeed
 import com.lagradost.cloudstream3.extractors.Sbthe
+import com.lagradost.cloudstream3.extractors.SecvideoOnline
 import com.lagradost.cloudstream3.extractors.Sendvid
+import com.lagradost.cloudstream3.extractors.Server1uns
 import com.lagradost.cloudstream3.extractors.SfastwishCom
 import com.lagradost.cloudstream3.extractors.ShaveTape
 import com.lagradost.cloudstream3.extractors.SibNet
 import com.lagradost.cloudstream3.extractors.Simpulumlamerop
+import com.lagradost.cloudstream3.extractors.Smoothpre
 import com.lagradost.cloudstream3.extractors.Sobreatsesuyp
 import com.lagradost.cloudstream3.extractors.Solidfiles
 import com.lagradost.cloudstream3.extractors.Ssbstream
@@ -204,6 +218,7 @@ import com.lagradost.cloudstream3.extractors.Streamlare
 import com.lagradost.cloudstream3.extractors.StreamoUpload
 import com.lagradost.cloudstream3.extractors.Streamplay
 import com.lagradost.cloudstream3.extractors.Streamsss
+import com.lagradost.cloudstream3.extractors.Streamup
 import com.lagradost.cloudstream3.extractors.Streamwish2
 import com.lagradost.cloudstream3.extractors.Strwish
 import com.lagradost.cloudstream3.extractors.Strwish2
@@ -240,6 +255,7 @@ import com.lagradost.cloudstream3.extractors.VidMoxy
 import com.lagradost.cloudstream3.extractors.VidSrcExtractor
 import com.lagradost.cloudstream3.extractors.VidSrcExtractor2
 import com.lagradost.cloudstream3.extractors.VidSrcTo
+import com.lagradost.cloudstream3.extractors.VidStack
 import com.lagradost.cloudstream3.extractors.VideoSeyred
 import com.lagradost.cloudstream3.extractors.VideoVard
 import com.lagradost.cloudstream3.extractors.VideovardSX
@@ -257,6 +273,8 @@ import com.lagradost.cloudstream3.extractors.Vidplay
 import com.lagradost.cloudstream3.extractors.VidplayOnline
 import com.lagradost.cloudstream3.extractors.Vidstreamz
 import com.lagradost.cloudstream3.extractors.Vidxstream
+import com.lagradost.cloudstream3.extractors.VinovoSi
+import com.lagradost.cloudstream3.extractors.VinovoTo
 import com.lagradost.cloudstream3.extractors.Vizcloud
 import com.lagradost.cloudstream3.extractors.Vizcloud2
 import com.lagradost.cloudstream3.extractors.VizcloudCloud
@@ -287,15 +305,19 @@ import com.lagradost.cloudstream3.extractors.Zorofile
 import com.lagradost.cloudstream3.extractors.Zplayer
 import com.lagradost.cloudstream3.extractors.ZplayerV2
 import com.lagradost.cloudstream3.extractors.Ztreamhub
-import com.lagradost.cloudstream3.extractors.VidStack
-import com.lagradost.cloudstream3.extractors.GDMirrorbot
-import com.lagradost.cloudstream3.extractors.LuluStream
+import com.lagradost.cloudstream3.extractors.FileMoon
+import com.lagradost.cloudstream3.extractors.FileMoonSx
+import com.lagradost.cloudstream3.extractors.FilemoonV2
+import com.lagradost.cloudstream3.extractors.Techinmind
 import com.lagradost.cloudstream3.mvvm.logError
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.ensureActive
 import me.xdrop.fuzzywuzzy.FuzzySearch
 import org.jsoup.Jsoup
 import java.net.URI
 import java.util.UUID
+import kotlin.coroutines.cancellation.CancellationException
 
 /**
  * For use in the ConcatenatingMediaSource.
@@ -318,16 +340,17 @@ fun Long.toUs(): Long {
  * If your site has an unorthodox m3u8-like system where there are multiple smaller videos concatenated
  * use this.
  * */
+@Suppress("DEPRECATION")
 data class ExtractorLinkPlayList(
     override val source: String,
     override val name: String,
     val playlist: List<PlayListItem>,
-    override val referer: String,
-    override val quality: Int,
-    override val headers: Map<String, String> = mapOf(),
+    override var referer: String,
+    override var quality: Int,
+    override var headers: Map<String, String> = mapOf(),
     /** Used for getExtractorVerifierJob() */
-    override val extractorData: String? = null,
-    override val type: ExtractorLinkType,
+    override var extractorData: String? = null,
+    override var type: ExtractorLinkType,
 ) : ExtractorLink(
     source = source,
     name = name,
@@ -432,6 +455,50 @@ val WIDEVINE_UUID = UUID(-0x121074568629b532L, -0x5c37d8232ae2de13L)
  */
 val PLAYREADY_UUID = UUID(-0x65fb0f8667bfbd7aL, -0x546d19a41f77a06bL)
 
+suspend fun newExtractorLink(
+    source: String,
+    name: String,
+    url: String,
+    type: ExtractorLinkType? = null,
+    initializer: suspend ExtractorLink.() -> Unit = { }
+): ExtractorLink {
+
+    @Suppress("DEPRECATION_ERROR")
+    val builder =
+        ExtractorLink(
+            source = source,
+            name = name,
+            url = url,
+            type = type ?: INFER_TYPE
+        )
+
+    builder.initializer()
+    return builder
+}
+
+suspend fun newDrmExtractorLink(
+    source: String,
+    name: String,
+    url: String,
+    type: ExtractorLinkType? = null,
+    uuid: UUID,
+    initializer: suspend DrmExtractorLink.() -> Unit = { }
+): DrmExtractorLink {
+
+    @Suppress("DEPRECATION_ERROR")
+    val builder =
+        DrmExtractorLink(
+            source = source,
+            name = name,
+            url = url,
+            uuid = uuid,
+            type = type ?: INFER_TYPE
+        )
+
+    builder.initializer()
+    return builder
+}
+
 /** Class holds extracted DRM media info to be passed to the player.
  * @property source Name of the media source, appears on player layout.
  * @property name Title of the media, appears on player layout.
@@ -446,17 +513,19 @@ val PLAYREADY_UUID = UUID(-0x65fb0f8667bfbd7aL, -0x546d19a41f77a06bL)
  * @property uuid Drm UUID [WIDEVINE_UUID], [PLAYREADY_UUID], [CLEARKEY_UUID] (by default) .. etc
  * @property kty Key type "oct" (octet sequence) by default
  * @property keyRequestParameters Parameters that will used to request the key.
+ * @see newDrmExtractorLink
  * */
+@Suppress("DEPRECATION")
 open class DrmExtractorLink private constructor(
     override val source: String,
     override val name: String,
     override val url: String,
-    override val referer: String,
-    override val quality: Int,
-    override val headers: Map<String, String> = mapOf(),
+    override var referer: String,
+    override var quality: Int,
+    override var headers: Map<String, String> = mapOf(),
     /** Used for getExtractorVerifierJob() */
-    override val extractorData: String? = null,
-    override val type: ExtractorLinkType,
+    override var extractorData: String? = null,
+    override var type: ExtractorLinkType,
     open var kid: String? = null,
     open var key: String? = null,
     open var uuid: UUID,
@@ -464,8 +533,44 @@ open class DrmExtractorLink private constructor(
     open var keyRequestParameters: HashMap<String, String>,
     open var licenseUrl: String? = null,
 ) : ExtractorLink(
-    source, name, url, referer, quality, type, headers, extractorData
+    source, name, url, referer, quality, headers, extractorData, type
 ) {
+    @Deprecated("Use newDrmExtractorLink", level = DeprecationLevel.ERROR)
+    constructor(
+        source: String,
+        name: String,
+        url: String,
+        referer: String? = null,
+        quality: Int? = null,
+        /** the type of the media, use INFER_TYPE if you want to auto infer the type from the url */
+        type: ExtractorLinkType? = INFER_TYPE,
+        headers: Map<String, String> = mapOf(),
+        /** Used for getExtractorVerifierJob() */
+        extractorData: String? = null,
+        kid: String? = null,
+        key: String? = null,
+        uuid: UUID = CLEARKEY_UUID,
+        kty: String? = "oct",
+        keyRequestParameters: HashMap<String, String> = hashMapOf(),
+        licenseUrl: String? = null,
+    ) : this(
+        source = source,
+        name = name,
+        url = url,
+        referer = referer ?: "",
+        quality = quality ?: Qualities.Unknown.value,
+        headers = headers,
+        extractorData = extractorData,
+        type = type ?: inferTypeFromUrl(url),
+        kid = kid,
+        key = key,
+        uuid = uuid,
+        keyRequestParameters = keyRequestParameters,
+        kty = kty,
+        licenseUrl = licenseUrl,
+    )
+
+    @Deprecated("Use newDrmExtractorLink", level = DeprecationLevel.ERROR)
     constructor(
         source: String,
         name: String,
@@ -510,17 +615,20 @@ open class DrmExtractorLink private constructor(
  * @property headers Headers <String, String> map that will be used by network request.
  * @property extractorData Used for getExtractorVerifierJob()
  * @property type Extracted link type (Video, M3u8, Dash, Torrent or Magnet)
+ * @see newExtractorLink
  * */
-open class ExtractorLink constructor(
+open class ExtractorLink
+@Deprecated("Use newExtractorLink", level = DeprecationLevel.WARNING)
+constructor(
     open val source: String,
     open val name: String,
     override val url: String,
-    override val referer: String,
-    open val quality: Int,
-    override val headers: Map<String, String> = mapOf(),
+    override var referer: String,
+    open var quality: Int,
+    override var headers: Map<String, String> = mapOf(),
     /** Used for getExtractorVerifierJob() */
-    open val extractorData: String? = null,
-    open val type: ExtractorLinkType,
+    open var extractorData: String? = null,
+    open var type: ExtractorLinkType,
 ) : IDownloadableMinimum {
     val isM3u8: Boolean get() = type == ExtractorLinkType.M3U8
     val isDash: Boolean get() = type == ExtractorLinkType.DASH
@@ -555,6 +663,32 @@ open class ExtractorLink constructor(
         return headers
     }
 
+    @Suppress("DEPRECATION")
+    @Deprecated("Use newExtractorLink", level = DeprecationLevel.ERROR)
+    constructor(
+        source: String,
+        name: String,
+        url: String,
+        referer: String? = null,
+        quality: Int? = null,
+        /** the type of the media, use INFER_TYPE if you want to auto infer the type from the url */
+        type: ExtractorLinkType? = INFER_TYPE,
+        headers: Map<String, String> = mapOf(),
+        /** Used for getExtractorVerifierJob() */
+        extractorData: String? = null,
+    ) : this(
+        source = source,
+        name = name,
+        url = url,
+        referer = referer ?: "",
+        quality = quality ?: Qualities.Unknown.value,
+        headers = headers,
+        extractorData = extractorData,
+        type = type ?: inferTypeFromUrl(url)
+    )
+
+    @Suppress("DEPRECATION")
+    @Deprecated("Use newExtractorLink", level = DeprecationLevel.ERROR)
     constructor(
         source: String,
         name: String,
@@ -581,6 +715,8 @@ open class ExtractorLink constructor(
      * Old constructor without isDash, allows for backwards compatibility with extensions.
      * Should be removed after all extensions have updated their cloudstream.jar
      **/
+    @Suppress("DEPRECATION_ERROR")
+    @Deprecated("Use newExtractorLink", level = DeprecationLevel.ERROR)
     constructor(
         source: String,
         name: String,
@@ -593,6 +729,8 @@ open class ExtractorLink constructor(
         extractorData: String? = null
     ) : this(source, name, url, referer, quality, isM3u8, headers, extractorData, false)
 
+    @Suppress("DEPRECATION")
+    @Deprecated("Use newExtractorLink", level = DeprecationLevel.ERROR)
     constructor(
         source: String,
         name: String,
@@ -707,12 +845,16 @@ suspend fun loadExtractor(
 /**
  * Tries to load the appropriate extractor based on link, returns true if any extractor is loaded.
  * */
+@Throws(CancellationException::class)
 suspend fun loadExtractor(
     url: String,
     referer: String? = null,
     subtitleCallback: (SubtitleFile) -> Unit,
     callback: (ExtractorLink) -> Unit
 ): Boolean {
+    // Ensure this coroutine has not timed out
+    coroutineScope { ensureActive() }
+
     val currentUrl = unshortenLinkSafe(url)
     val compareUrl = currentUrl.lowercase().replace(schemaStripRegex, "")
 
@@ -720,7 +862,15 @@ suspend fun loadExtractor(
     for (index in extractorApis.lastIndex downTo 0) {
         val extractor = extractorApis[index]
         if (compareUrl.startsWith(extractor.mainUrl.replace(schemaStripRegex, ""))) {
-            extractor.getSafeUrl(currentUrl, referer, subtitleCallback, callback)
+            try {
+                extractor.getUrl(currentUrl, referer, subtitleCallback, callback)
+            } catch (e: Exception) {
+                logError(e)
+                // Rethrow if we have timed out
+                if (e is CancellationException) {
+                    throw e
+                }
+            }
             return true
         }
     }
@@ -733,7 +883,15 @@ suspend fun loadExtractor(
                 currentUrl
             ) > 80
         ) {
-            extractor.getSafeUrl(currentUrl, referer, subtitleCallback, callback)
+            try {
+                extractor.getUrl(currentUrl, referer, subtitleCallback, callback)
+            } catch (e: Exception) {
+                logError(e)
+                // Rethrow if we have timed out
+                if (e is CancellationException) {
+                    throw e
+                }
+            }
             return true
         }
     }
@@ -940,6 +1098,7 @@ val extractorApis: MutableList<ExtractorApi> = arrayListOf(
     Guccihide(),
     FileMoon(),
     FileMoonSx(),
+    FilemoonV2(),
 
     Vido(),
     Linkbox(),
@@ -958,6 +1117,7 @@ val extractorApis: MutableList<ExtractorApi> = arrayListOf(
     MoviehabNet(),
     Jeniusplay(),
     StreamoUpload(),
+    Streamup(),
 
     GamoVideo(),
     Gdriveplayerapi(),
@@ -1005,10 +1165,17 @@ val extractorApis: MutableList<ExtractorApi> = arrayListOf(
     VidHidePro4(),
     VidHidePro5(),
     VidHidePro6(),
+    Dhtpre(),
+    Dhcplay(),
+    Smoothpre(),
+    Peytonepre(),
     LuluStream(),
     Lulustream1(),
     Lulustream2(),
     StreamWishExtractor(),
+    BigwarpIO(),
+    BigwarpArt(),
+    BgwpCC(),
     WishembedPro(),
     CdnwishCom(),
     FlaswishCom(),
@@ -1021,8 +1188,13 @@ val extractorApis: MutableList<ExtractorApi> = arrayListOf(
     Vidguardto1(),
     Vidguardto2(),
     Vidguardto3(),
+    SecvideoOnline(),
+    FsstOnline(),
+    CsstOnline(),
+    DsstOnline(),
     Simpulumlamerop(),
     Urochsunloath(),
+    NathanFromSubject(),
     Yipsu(),
     MetaGnathTuggers(),
     Geodailymotion(),
@@ -1061,7 +1233,12 @@ val extractorApis: MutableList<ExtractorApi> = arrayListOf(
     InternetArchive(),
     VidStack(),
     GDMirrorbot(),
-    )
+    Techinmind(),
+    Server1uns(),
+    VinovoSi(),
+    VinovoTo(),
+    CloudMailRu(),
+)
 
 
 fun getExtractorApiFromName(name: String): ExtractorApi {
@@ -1146,10 +1323,11 @@ abstract class ExtractorApi {
     var sourcePlugin: String? = null
 
     //suspend fun getSafeUrl(url: String, referer: String? = null): List<ExtractorLink>? {
-    //    return suspendSafeApiCall { getUrl(url, referer) }
+    //    return safeAsync { getUrl(url, referer) }
     //}
 
     // this is the new extractorapi, override to add subtitles and stuff
+    @Throws
     open suspend fun getUrl(
         url: String,
         referer: String? = null,
@@ -1175,6 +1353,7 @@ abstract class ExtractorApi {
     /**
      * Will throw errors, use getSafeUrl if you don't want to handle the exception yourself
      */
+    @Throws
     open suspend fun getUrl(url: String, referer: String? = null): List<ExtractorLink>? {
         return emptyList()
     }

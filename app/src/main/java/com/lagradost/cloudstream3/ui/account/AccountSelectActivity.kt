@@ -3,7 +3,7 @@ package com.lagradost.cloudstream3.ui.account
 import android.annotation.SuppressLint
 import android.os.Bundle
 import android.util.Log
-import androidx.activity.ComponentActivity
+import androidx.fragment.app.FragmentActivity
 import androidx.activity.viewModels
 import androidx.preference.PreferenceManager
 import androidx.recyclerview.widget.GridLayoutManager
@@ -31,10 +31,12 @@ import com.lagradost.cloudstream3.utils.BiometricAuthenticator.startBiometricAut
 import com.lagradost.cloudstream3.utils.DataStoreHelper.accounts
 import com.lagradost.cloudstream3.utils.DataStoreHelper.selectedKeyIndex
 import com.lagradost.cloudstream3.utils.DataStoreHelper.setAccount
-import com.lagradost.cloudstream3.utils.UIHelper.colorFromAttribute
+import com.lagradost.cloudstream3.utils.UIHelper.enableEdgeToEdgeCompat
+import com.lagradost.cloudstream3.utils.UIHelper.fixSystemBarsPadding
 import com.lagradost.cloudstream3.utils.UIHelper.openActivity
+import com.lagradost.cloudstream3.utils.UIHelper.setNavigationBarColorCompat
 
-class AccountSelectActivity : ComponentActivity(), BiometricCallback {
+class AccountSelectActivity : FragmentActivity(), BiometricCallback {
 
     val accountViewModel: AccountViewModel by viewModels()
 
@@ -43,8 +45,8 @@ class AccountSelectActivity : ComponentActivity(), BiometricCallback {
         super.onCreate(savedInstanceState)
         loadThemes(this)
 
-        @Suppress("DEPRECATION")
-        window.navigationBarColor = colorFromAttribute(R.attr.primaryBlackBackground)
+        enableEdgeToEdgeCompat()
+        setNavigationBarColorCompat(R.attr.primaryBlackBackground)
 
         // Are we editing and coming from MainActivity?
         val isEditingFromMainActivity = intent.getBooleanExtra(
@@ -53,7 +55,8 @@ class AccountSelectActivity : ComponentActivity(), BiometricCallback {
         )
 
         val settingsManager = PreferenceManager.getDefaultSharedPreferences(this)
-        val skipStartup = settingsManager.getBoolean(getString(R.string.skip_startup_account_select_key), false
+        val skipStartup = settingsManager.getBoolean(
+            getString(R.string.skip_startup_account_select_key), false
         ) || accounts.count() <= 1
 
         fun askBiometricAuth() {
@@ -89,10 +92,12 @@ class AccountSelectActivity : ComponentActivity(), BiometricCallback {
                 accountViewModel.handleAccountSelect(currentAccount, this, true)
             } else {
                 if (accounts.count() > 1) {
-                    showToast(this, getString(
-                        R.string.logged_account,
-                        currentAccount?.name
-                    ))
+                    showToast(
+                        this, getString(
+                            R.string.logged_account,
+                            currentAccount?.name
+                        )
+                    )
                 }
 
                 navigateToMainActivity()
@@ -105,12 +110,12 @@ class AccountSelectActivity : ComponentActivity(), BiometricCallback {
 
         val binding = ActivityAccountSelectBinding.inflate(layoutInflater)
         setContentView(binding.root)
+        fixSystemBarsPadding(binding.root, padTop = false)
 
         val recyclerView: AutofitRecyclerView = binding.accountRecyclerView
 
         observe(accountViewModel.accounts) { liveAccounts ->
             val adapter = AccountAdapter(
-                liveAccounts,
                 // Handle the selected account
                 accountSelectCallback = {
                     accountViewModel.handleAccountSelect(it, this)
@@ -118,7 +123,6 @@ class AccountSelectActivity : ComponentActivity(), BiometricCallback {
                 accountCreateCallback = { accountViewModel.handleAccountUpdate(it, this) },
                 accountEditCallback = {
                     accountViewModel.handleAccountUpdate(it, this)
-
                     // We came from MainActivity, return there
                     // and switch to the edited account
                     if (isEditingFromMainActivity) {
@@ -126,8 +130,10 @@ class AccountSelectActivity : ComponentActivity(), BiometricCallback {
                         navigateToMainActivity()
                     }
                 },
-                accountDeleteCallback = { accountViewModel.handleAccountDelete(it,this) }
-            )
+                accountDeleteCallback = { accountViewModel.handleAccountDelete(it, this) }
+            ).apply {
+                submitList(liveAccounts)
+            }
 
             recyclerView.adapter = adapter
 
@@ -188,7 +194,7 @@ class AccountSelectActivity : ComponentActivity(), BiometricCallback {
     }
 
     override fun onAuthenticationSuccess() {
-       Log.i(BiometricAuthenticator.TAG,"Authentication successful in AccountSelectActivity")
+        Log.i(BiometricAuthenticator.TAG, "Authentication successful in AccountSelectActivity")
     }
 
     override fun onAuthenticationError() {
