@@ -66,8 +66,8 @@ fun getCurrentLocale(context: Context): String {
 */
 val appLanguages = arrayListOf(
     /* begin language list */
-    Triple("", "English", "en"),
-    Triple("", "українська", "uk"),
+    Pair("English", "en"),
+    Pair("українська", "uk"),
 /* end language list */
 ).sortedBy { it.first.lowercase(Locale.ROOT) } // ye, we go alphabetical, so ppl don't put their lang on top
 
