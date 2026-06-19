@@ -1,18 +1,26 @@
 package com.lagradost.cloudstream3.ui.setup
 
+import android.view.View
 import android.widget.AbsListView
 import android.widget.ArrayAdapter
+import androidx.core.content.edit
 import androidx.navigation.fragment.findNavController
 import androidx.preference.PreferenceManager
-import com.lagradost.cloudstream3.AcraApplication.Companion.setKey
+import com.lagradost.cloudstream3.CloudStreamApp.Companion.setKey
 import com.lagradost.cloudstream3.R
 import com.lagradost.cloudstream3.databinding.FragmentSetupLayoutBinding
 import com.lagradost.cloudstream3.mvvm.safe
 import com.lagradost.cloudstream3.ui.BaseFragment
+import com.lagradost.cloudstream3.utils.UIHelper.fixSystemBarsPadding
 
 class SetupFragmentLayout : BaseFragment<FragmentSetupLayoutBinding>(
     BaseFragment.BindingCreator.Inflate(FragmentSetupLayoutBinding::inflate)
 ) {
+
+    override fun fixLayout(view: View) {
+        fixSystemBarsPadding(view)
+    }
+
     override fun onBindingCreated(binding: FragmentSetupLayoutBinding) {
         safe {
             val ctx = context ?: return@safe
@@ -37,9 +45,9 @@ class SetupFragmentLayout : BaseFragment<FragmentSetupLayoutBinding>(
                 )
 
                 listview1.setOnItemClickListener { _, _, position, _ ->
-                    settingsManager.edit()
-                        .putInt(getString(R.string.app_layout_key), prefValues[position])
-                        .apply()
+                    settingsManager.edit {
+                        putInt(getString(R.string.app_layout_key), prefValues[position])
+                    }
                     activity?.recreate()
                 }
 

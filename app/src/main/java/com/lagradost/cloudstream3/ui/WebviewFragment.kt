@@ -6,9 +6,7 @@ import android.webkit.JavascriptInterface
 import android.webkit.WebResourceRequest
 import android.webkit.WebView
 import android.webkit.WebViewClient
-import androidx.annotation.OptIn
 import androidx.fragment.app.FragmentActivity
-import androidx.media3.common.util.UnstableApi
 import androidx.navigation.fragment.findNavController
 import com.lagradost.cloudstream3.MainActivity
 import com.lagradost.cloudstream3.USER_AGENT
@@ -20,9 +18,7 @@ class WebviewFragment : BaseFragment<FragmentWebviewBinding>(
     BaseFragment.BindingCreator.Inflate(FragmentWebviewBinding::inflate)
 ) {
 
-    override fun fixPadding(view: View) {
-        // Don't need any padding here
-    }
+    override fun fixLayout(view: View) = Unit
 
     override fun onBindingCreated(binding: FragmentWebviewBinding) {
         val url = arguments?.getString(WEBVIEW_URL) ?: "".also {
@@ -30,7 +26,6 @@ class WebviewFragment : BaseFragment<FragmentWebviewBinding>(
         }
 
         binding.webView.webViewClient = object : WebViewClient() {
-            @OptIn(UnstableApi::class)
             override fun shouldOverrideUrlLoading(
                 view: WebView?,
                 request: WebResourceRequest?
@@ -45,6 +40,7 @@ class WebviewFragment : BaseFragment<FragmentWebviewBinding>(
                 return super.shouldOverrideUrlLoading(view, request)
             }
         }
+
         binding.webView.apply {
             WebViewResolver.webViewUserAgent = settings.userAgentString
 
@@ -55,7 +51,6 @@ class WebviewFragment : BaseFragment<FragmentWebviewBinding>(
 
             loadUrl(url)
         }
-
     }
 
     companion object {

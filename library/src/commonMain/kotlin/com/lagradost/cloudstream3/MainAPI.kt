@@ -17,21 +17,34 @@ import com.lagradost.cloudstream3.syncproviders.SyncIdName
 import com.lagradost.cloudstream3.utils.*
 import com.lagradost.cloudstream3.utils.AppUtils.toJson
 import com.lagradost.cloudstream3.utils.AppUtils.tryParseJson
+import com.lagradost.cloudstream3.utils.Coroutines.atomicListOf
 import com.lagradost.cloudstream3.utils.Coroutines.mainWork
-import com.lagradost.cloudstream3.utils.Coroutines.threadSafeListOf
 import com.lagradost.cloudstream3.utils.SubtitleHelper.fromCodeToLangTagIETF
 import com.lagradost.cloudstream3.utils.SubtitleHelper.fromLanguageToTagIETF
 import com.lagradost.nicehttp.RequestBodyTypes
+import io.ktor.http.Url
+import io.ktor.http.URLBuilder
+import io.ktor.http.encodedPath
+import io.ktor.http.takeFrom
 import okhttp3.Interceptor
 import okhttp3.MediaType.Companion.toMediaTypeOrNull
 import okhttp3.RequestBody.Companion.toRequestBody
-import java.net.URI
-import java.text.SimpleDateFormat
-import java.util.*
+import kotlinx.datetime.LocalDate
+import kotlinx.datetime.LocalTime
+import kotlinx.datetime.TimeZone
+import kotlinx.datetime.atStartOfDayIn
+import kotlinx.datetime.format.DateTimeComponents
+import kotlinx.datetime.format.FormatStringsInDatetimeFormats
+import kotlinx.datetime.format.byUnicodePattern
+import kotlinx.datetime.format.char
+import kotlinx.datetime.format.parse
+import kotlinx.datetime.toInstant
+import kotlinx.serialization.json.Json
 import kotlin.io.encoding.Base64
-import kotlin.io.encoding.ExperimentalEncodingApi
 import kotlin.math.absoluteValue
 import kotlin.math.roundToInt
+import kotlin.time.Clock
+import kotlin.time.Instant
 
 /**
  * API available only on prerelease builds.
@@ -46,6 +59,22 @@ import kotlin.math.roundToInt
 )
 annotation class Prerelease
 
+@Retention(AnnotationRetention.BINARY) // This is only an IDE hint, and will not be used in the runtime
+@RequiresOptIn(
+    message = "This API is marked as internal and should not be used by extensions. " +
+              "Using it could cause catastrophic build or runtime errors and may " +
+              "be changed or removed at any time.",
+    level = RequiresOptIn.Level.ERROR
+)
+annotation class InternalAPI
+
+@Retention(AnnotationRetention.BINARY) // This is only an IDE hint, and will not be used in the runtime
+@RequiresOptIn(
+    message = "Only use this if you know what you are doing and you need to bypass the SSL certificate checks. Never use this for sensitive network requests such as logins.",
+    level = RequiresOptIn.Level.WARNING
+)
+annotation class UnsafeSSL
+
 /**
  * Defines the constant for the all languages preference, if this is set then it is
  * the equivalent of all languages being set
@@ -58,20 +87,27 @@ const val USER_AGENT =
 class ErrorLoadingException(message: String? = null) : Exception(message)
 
 //val baseHeader = mapOf("User-Agent" to USER_AGENT)
+
+@Prerelease
+val json = Json {
+    encodeDefaults = true
+    explicitNulls = false
+    ignoreUnknownKeys = true
+}
+
 val mapper = JsonMapper.builder().addModule(kotlinModule())
     .configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false).build()!!
 
 object APIHolder {
-    val unixTime: Long
-        get() = System.currentTimeMillis() / 1000L
     val unixTimeMS: Long
-        get() = System.currentTimeMillis()
+        get() = Clock.System.now().toEpochMilliseconds()
+    val unixTime: Long
+        get() = unixTimeMS / 1000L
 
-    // ConcurrentModificationException is possible!!!
-    val allProviders = threadSafeListOf<MainAPI>()
+    val allProviders = atomicListOf<MainAPI>()
 
     fun initAll() {
-        synchronized(allProviders) {
+        allProviders.withLock {
             for (api in allProviders) {
                 api.init()
             }
@@ -81,28 +117,28 @@ object APIHolder {
 
     /** String extension function to Capitalize first char of string.*/
     fun String.capitalize(): String {
-        return this.replaceFirstChar { if (it.isLowerCase()) it.titlecase(Locale.getDefault()) else it.toString() }
+        return this.replaceFirstChar { if (it.isLowerCase()) it.titlecase() else it.toString() }
     }
 
-    var apis: List<MainAPI> = threadSafeListOf()
+    var apis: AtomicList<MainAPI> = atomicListOf()
     var apiMap: Map<String, Int>? = null
 
     fun addPluginMapping(plugin: MainAPI) {
-        synchronized(apis) {
+        apis.withLock {
             apis = apis + plugin
         }
         initMap(true)
     }
 
     fun removePluginMapping(plugin: MainAPI) {
-        synchronized(apis) {
+        apis.withLock {
             apis = apis.filter { it != plugin }
         }
         initMap(true)
     }
 
     private fun initMap(forcedUpdate: Boolean = false) {
-        synchronized(apis) {
+        apis.withLock {
             if (apiMap == null || forcedUpdate)
                 apiMap = apis.mapIndexed { index, api -> api.name to index }.toMap()
         }
@@ -110,24 +146,21 @@ object APIHolder {
 
     fun getApiFromNameNull(apiName: String?): MainAPI? {
         if (apiName == null) return null
-        synchronized(allProviders) {
+        return allProviders.withLock {
             initMap()
-            synchronized(apis) {
-                return apiMap?.get(apiName)?.let { apis.getOrNull(it) }
+            apis.withLock {
+                apiMap?.get(apiName)?.let { apis.getOrNull(it) }
                 // Leave the ?. null check, it can crash regardless
-                    ?: allProviders.firstOrNull { it.name == apiName }
+                ?: allProviders.firstOrNull { it.name == apiName }
             }
         }
     }
 
     fun getApiFromUrlNull(url: String?): MainAPI? {
         if (url == null) return null
-        synchronized(allProviders) {
-            allProviders.forEach { api ->
-                if (url.startsWith(api.mainUrl)) return api
-            }
+        return allProviders.withLock {
+            allProviders.firstOrNull { url.startsWith(it.mainUrl) }
         }
-        return null
     }
 
     /**
@@ -145,9 +178,9 @@ object APIHolder {
     // To get the key
     suspend fun getCaptchaToken(url: String, key: String, referer: String? = null): String? {
         try {
-            val uri = URI.create(url)
+            val _url = Url(url)
             val domain = base64Encode(
-                (uri.scheme + "://" + uri.host + ":443").encodeToByteArray(),
+                (_url.protocol.name + "://" + _url.host + ":443").encodeToByteArray(),
             ).replace("\n", "").replace("=", ".")
 
             val vToken =
@@ -232,6 +265,7 @@ object APIHolder {
 
             Tracker(
                 res.idMal,
+                null,
                 res.id.toString(),
                 res.coverImage?.extraLarge ?: res.coverImage?.large,
                 res.bannerImage
@@ -455,7 +489,7 @@ abstract class MainAPI {
     }
 
     fun init() {
-        overrideData?.get(this.javaClass.simpleName)?.let { data ->
+        overrideData?.get(this::class.simpleName)?.let { data ->
             overrideWithNewData(data)
         }
     }
@@ -669,17 +703,22 @@ abstract class MainAPI {
     }
 }
 
-/** Might need a different implementation for desktop*/
 fun base64Decode(string: String): String {
-    return String(base64DecodeArray(string), Charsets.ISO_8859_1)
+    // ISO-8859-1 decoding: each byte maps directly to its Unicode code point (0-255),
+    // so we mask each byte to unsigned and convert to the corresponding Char manually.
+    // decodeToString() can't be used here as it assumes UTF-8.
+    val bytes = base64DecodeArray(string)
+    return buildString(bytes.size) {
+        for (b in bytes) {
+            append((b.toInt() and 0xFF).toChar())
+        }
+    }
 }
 
-@OptIn(ExperimentalEncodingApi::class)
 fun base64DecodeArray(string: String): ByteArray {
     return Base64.decode(string)
 }
 
-@OptIn(ExperimentalEncodingApi::class)
 fun base64Encode(array: ByteArray): String {
     return Base64.encode(array)
 }
@@ -738,7 +777,7 @@ fun capitalizeStringNullable(str: String?): String? {
     if (str == null)
         return null
     return try {
-        str.replaceFirstChar { if (it.isLowerCase()) it.titlecase(Locale.getDefault()) else it.toString() }
+        str.replaceFirstChar(Char::titlecase)
     } catch (e: Exception) {
         str
     }
@@ -747,7 +786,7 @@ fun capitalizeStringNullable(str: String?): String? {
 fun fixTitle(str: String): String {
     return str.split(" ").joinToString(" ") {
         it.lowercase()
-            .replaceFirstChar { char -> if (char.isLowerCase()) char.titlecase(Locale.getDefault()) else it }
+            .replaceFirstChar(Char::titlecase)
     }
 }
 
@@ -1047,6 +1086,8 @@ enum class TvType(value: Int?) {
 
     Audio(16),
     Podcast(17),
+    @Prerelease
+    Video(18),
 }
 
 enum class AutoDownloadMode(val value: Int) {
@@ -1062,14 +1103,15 @@ enum class AutoDownloadMode(val value: Int) {
 }
 
 /** Extension function of [TvType] to check if the type is Movie.
- * @return If the type is AnimeMovie, Live, Movie, Torrent returns true otherwise returns false.
+ * @return If the type is AnimeMovie, Live, Movie, Torrent, Video returns true otherwise returns false.
  * */
 fun TvType.isMovieType(): Boolean {
     return when (this) {
         TvType.AnimeMovie,
         TvType.Live,
         TvType.Movie,
-        TvType.Torrent -> true
+        TvType.Torrent,
+        TvType.Video -> true
 
         else -> false
     }
@@ -1139,6 +1181,33 @@ suspend fun newSubtitleFile(
     )
     builder.initializer()
 
+    return builder
+}
+
+/** Data class for the Audio file/track info.
+ * @property lang Audio track language.
+ * @property url Audio file url to download/load the file.
+ * @property label Optional label to display (e.g., "English 5.1", "Japanese Stereo").
+ * @property headers Optional headers for the audio file request.
+ * @see newAudioFile
+ * */
+@ConsistentCopyVisibility
+data class AudioFile internal constructor(
+    var url: String,
+    var headers: Map<String, String>? = null
+)
+
+/** Creates an AudioFile with optional initializer for setting additional properties.
+ * @param url Audio file url.
+ * @param initializer Lambda to configure additional properties like headers.
+ * @return Configured AudioFile instance.
+ * */
+suspend fun newAudioFile(
+    url: String,
+    initializer: suspend AudioFile.() -> Unit = { }
+): AudioFile {
+    val builder = AudioFile(url)
+    builder.initializer()
     return builder
 }
 
@@ -1261,23 +1330,23 @@ fun getQualityFromString(string: String?): SearchQuality? {
  * ```
  */
 fun MainAPI.updateUrl(url: String): String {
-    try {
-        val original = URI(url)
-        val updated = URI(mainUrl)
+    return try {
+        val original = Url(url)
+        val updated = Url(mainUrl)
 
-        // URI(String scheme, String userInfo, String host, int port, String path, String query, String fragment)
-        return URI(
-            updated.scheme,
-            original.userInfo,
-            updated.host,
-            updated.port,
-            original.path,
-            original.query,
-            original.fragment
-        ).toString()
+        URLBuilder().apply {
+            takeFrom(updated)
+            user = original.user
+            password = original.password
+            encodedPath = original.encodedPath
+            fragment = original.fragment
+
+            parameters.clear()
+            parameters.appendAll(original.parameters)
+        }.buildString()
     } catch (t: Throwable) {
         logError(t)
-        return url
+        url
     }
 }
 
@@ -1441,7 +1510,7 @@ constructor(
 
     override var posterUrl: String? = null,
     var year: Int? = null,
-    var dubStatus: EnumSet<DubStatus>? = null,
+    var dubStatus: MutableSet<DubStatus>? = null,
 
     var otherName: String? = null,
     var episodes: MutableMap<DubStatus, Int> = mutableMapOf(),
@@ -1450,46 +1519,10 @@ constructor(
     override var quality: SearchQuality? = null,
     override var posterHeaders: Map<String, String>? = null,
     override var score: Score? = null,
-) : SearchResponse {
-    @Suppress("DEPRECATION_ERROR")
-    @Deprecated(
-        "Use newAnimeSearchResponse",
-        level = DeprecationLevel.ERROR
-    )
-    constructor(
-        name: String,
-        url: String,
-        apiName: String,
-        type: TvType? = null,
-
-        posterUrl: String? = null,
-        year: Int? = null,
-        dubStatus: EnumSet<DubStatus>? = null,
-
-        otherName: String? = null,
-        episodes: MutableMap<DubStatus, Int> = mutableMapOf(),
-
-        id: Int? = null,
-        quality: SearchQuality? = null,
-        posterHeaders: Map<String, String>? = null,
-    ) : this(
-        name,
-        url,
-        apiName,
-        type,
-        posterUrl,
-        year,
-        dubStatus,
-        otherName,
-        episodes,
-        id,
-        quality,
-        posterHeaders, null
-    )
-}
+) : SearchResponse
 
 fun AnimeSearchResponse.addDubStatus(status: DubStatus, episodes: Int? = null) {
-    this.dubStatus = dubStatus?.also { it.add(status) } ?: EnumSet.of(status)
+    this.dubStatus = dubStatus?.also { it.add(status) } ?: mutableSetOf(status)
     if (this.type?.isMovieType() != true)
         if (episodes != null && episodes > 0)
             this.episodes[status] = episodes
@@ -1719,6 +1752,7 @@ data class TrailerData(
  * @property syncData Online sync services compatible with the media.
  * @property posterHeaders headers map used by network request to get the poster.
  * @property backgroundPosterUrl Url of the media background poster.
+ * @property logoUrl Image URL used as a visual title replacement.If the logo loads successfully, it is shown instead of the text title. If the logo is null or fails to load, the text title is displayed.
  * @property contentRating content rating of the media, appears on result page.
  * @property uniqueUrl The key used for storing the persistent data about an entry.
  * On older versions `url` was used instead, but this was added to support JSON that can change as the url parameter.
@@ -1745,6 +1779,8 @@ interface LoadResponse {
     var syncData: MutableMap<String, String>
     var posterHeaders: Map<String, String>?
     var backgroundPosterUrl: String?
+
+    var logoUrl: String?
     var contentRating: String?
 
     var uniqueUrl: String
@@ -1764,6 +1800,8 @@ interface LoadResponse {
 
     companion object {
         var malIdPrefix = "" //malApi.idPrefix
+
+        var kitsuIdPrefix = "" //kitsuApi.idPrefix
         var aniListIdPrefix = "" //aniListApi.idPrefix
         var simklIdPrefix = "" //simklApi.idPrefix
         var isTrailersEnabled = true
@@ -1824,6 +1862,9 @@ interface LoadResponse {
             return this.syncData[malIdPrefix]
         }
 
+        fun LoadResponse.getKitsuId(): String? {
+            return this.syncData[kitsuIdPrefix]
+        }
         fun LoadResponse.getAniListId(): String? {
             return this.syncData[aniListIdPrefix]
         }
@@ -1843,6 +1884,10 @@ interface LoadResponse {
         fun LoadResponse.addMalId(id: Int?) {
             this.syncData[malIdPrefix] = (id ?: return).toString()
             this.addSimklId(SimklSyncServices.Mal, id.toString())
+        }
+
+        fun LoadResponse.addKitsuId(id: Int?) {
+            this.syncData[kitsuIdPrefix] = (id ?: return).toString()
         }
 
         fun LoadResponse.addAniListId(id: Int?) {
@@ -1947,24 +1992,6 @@ interface LoadResponse {
         fun LoadResponse.addImdbId(id: String?) {
             // TODO add IMDb sync
             this.addSimklId(SimklSyncServices.Imdb, id)
-        }
-
-        @Deprecated(
-            "Outdated API due to misspelling",
-            replaceWith = ReplaceWith("addTraktId(id)"),
-            level = DeprecationLevel.ERROR
-        )
-        fun LoadResponse.addTrackId(id: String?) {
-            this.addTraktId(id)
-        }
-
-        @Deprecated(
-            "Outdated API due to missing capitalization",
-            replaceWith = ReplaceWith("addKitsuId(id)"),
-            level = DeprecationLevel.ERROR
-        )
-        fun LoadResponse.addkitsuId(id: String?) {
-            this.addKitsuId(id)
         }
 
         @Suppress("UNUSED_PARAMETER")
@@ -2124,6 +2151,7 @@ fun TvType.getFolderPrefix(): String {
         TvType.Podcast -> "Podcasts"
         TvType.Torrent -> "Torrents"
         TvType.TvSeries -> "TVSeries"
+        TvType.Video -> "Videos"
     }
 }
 
@@ -2206,6 +2234,7 @@ constructor(
     override var syncData: MutableMap<String, String> = mutableMapOf(),
     override var posterHeaders: Map<String, String>? = null,
     override var backgroundPosterUrl: String? = null,
+    override var logoUrl: String? = null,
     override var contentRating: String? = null,
     override var uniqueUrl: String = url
 ) : LoadResponse
@@ -2266,6 +2295,7 @@ constructor(
     override var nextAiring: NextAiring? = null,
     override var seasonNames: List<SeasonData>? = null,
     override var backgroundPosterUrl: String? = null,
+    override var logoUrl: String? = null,
     override var contentRating: String? = null,
     override var uniqueUrl: String = url
 ) : LoadResponse, EpisodeResponse {
@@ -2351,6 +2381,7 @@ constructor(
     override var syncData: MutableMap<String, String> = mutableMapOf(),
     override var posterHeaders: Map<String, String>? = null,
     override var backgroundPosterUrl: String? = null,
+    override var logoUrl: String? = null,
     override var contentRating: String? = null,
     override var uniqueUrl: String = url
 ) : LoadResponse
@@ -2399,6 +2430,7 @@ constructor(
     override var syncData: MutableMap<String, String> = mutableMapOf(),
     override var posterHeaders: Map<String, String>? = null,
     override var backgroundPosterUrl: String? = null,
+    override var logoUrl: String? = null,
     override var contentRating: String? = null,
     override var uniqueUrl: String = url
 ) : LoadResponse
@@ -2489,15 +2521,45 @@ constructor(
         get() = score?.toInt(100)
 }
 
+@OptIn(FormatStringsInDatetimeFormats::class)
 fun Episode.addDate(date: String?, format: String = "yyyy-MM-dd") {
-    try {
-        this.date = SimpleDateFormat(format).parse(date ?: return)?.time
-    } catch (e: Exception) {
-        logError(e)
-    }
+    if (date == null) return
+    this.date = runCatching {
+        // First try standard ISO 8601 (e.g. "2026-01-01T12:30:00.000Z", "2026-05-17T14:35+02:00")
+        runCatching { Instant.parse(date).toEpochMilliseconds() }
+            .getOrElse {
+                val fmt = DateTimeComponents.Format { byUnicodePattern(format) }
+                val components = DateTimeComponents.parse(date, fmt)
+                /**
+                 * Try multiple conversions in order of precision for non-ISO-8601 formats,
+                 * since the date string may or may not include time and/or timezone offset:
+                 * 1. If the custom format produced a UTC offset (e.g. "2026-05-17 14:35+02:00"), use it directly
+                 * 2. If it has time but no offset (e.g. "2026-05-17 14:35"), fall back to device timezone
+                 * 3. If it's date-only (e.g. "2026-05-17"), use start of day in device timezone
+                 */
+                runCatching { components.toInstantUsingOffset().toEpochMilliseconds() }
+                    .recoverCatching { components.toLocalDateTime().toInstant(TimeZone.currentSystemDefault()).toEpochMilliseconds() }
+                    .getOrElse { components.toLocalDate().atStartOfDayIn(TimeZone.currentSystemDefault()).toEpochMilliseconds() }
+            }
+    }.onFailure { logError(it) }.getOrNull()
 }
 
-fun Episode.addDate(date: Date?) {
+@Prerelease
+fun Episode.addDate(date: LocalDate?) {
+    this.date = date?.atStartOfDayIn(TimeZone.currentSystemDefault())?.toEpochMilliseconds()
+}
+
+@Prerelease
+fun Episode.addDate(date: Instant?) {
+    this.date = date?.toEpochMilliseconds()
+}
+
+// Deprecate after next stable
+/* @Deprecated(
+    message = "Use addDate with LocalDate, Instant, or String instead.",
+    level = DeprecationLevel.WARNING,
+) */
+fun Episode.addDate(date: java.util.Date?) {
     this.date = date?.time
 }
 
@@ -2578,6 +2640,7 @@ constructor(
     override var nextAiring: NextAiring? = null,
     override var seasonNames: List<SeasonData>? = null,
     override var backgroundPosterUrl: String? = null,
+    override var logoUrl: String? = null,
     override var contentRating: String? = null,
     override var uniqueUrl: String = url
 ) : LoadResponse, EpisodeResponse {
@@ -2633,6 +2696,27 @@ fun fetchUrls(text: String?): List<String> {
     return linkRegex.findAll(text).map { it.value.trim().removeSurrounding("\"") }.toList()
 }
 
+@Prerelease
+fun isUpcoming(dateString: String?): Boolean {
+    return runCatching {
+        val fmt = DateTimeComponents.Format {
+            year(); char('-'); monthNumber(); char('-'); day()
+        }
+        val components = DateTimeComponents.parse(dateString ?: return false, fmt)
+        /**
+         * Try multiple conversions in order of precision, since the date string format
+         * may or may not include time and/or timezone offset information:
+         * 1. If the string has a UTC offset (e.g. "2026-05-17T14:35+02:00"), use it directly
+         * 2. If it has time but no offset (e.g. "2026-05-17T14:35"), fall back to device timezone
+         * 3. If it's date-only (e.g. "2026-05-17"), use start of day in device timezone
+         */
+        val instant = runCatching { components.toInstantUsingOffset() }
+            .recoverCatching { components.toLocalDateTime().toInstant(TimeZone.currentSystemDefault()) }
+            .getOrElse { components.toLocalDate().atStartOfDayIn(TimeZone.currentSystemDefault()) }
+        Clock.System.now() < instant
+    }.onFailure { logError(it) }.getOrElse { false }
+}
+
 @Deprecated(
     "toRatingInt() is deprecated. Use new score API instead.",
     level = DeprecationLevel.ERROR
@@ -2642,6 +2726,7 @@ fun String?.toRatingInt(): Int? =
 
 data class Tracker(
     val malId: Int? = null,
+    val kitsuId: String? = null,
     val aniId: String? = null,
     val image: String? = null,
     val cover: String? = null,

@@ -24,9 +24,9 @@ import com.google.android.material.tabs.TabLayout
 import com.google.android.material.tabs.TabLayoutMediator
 import com.lagradost.cloudstream3.APIHolder
 import com.lagradost.cloudstream3.APIHolder.allProviders
-import com.lagradost.cloudstream3.AcraApplication.Companion.getKey
-import com.lagradost.cloudstream3.AcraApplication.Companion.openBrowser
-import com.lagradost.cloudstream3.AcraApplication.Companion.setKey
+import com.lagradost.cloudstream3.CloudStreamApp.Companion.getKey
+import com.lagradost.cloudstream3.CloudStreamApp.Companion.openBrowser
+import com.lagradost.cloudstream3.CloudStreamApp.Companion.setKey
 import com.lagradost.cloudstream3.MainActivity
 import com.lagradost.cloudstream3.R
 import com.lagradost.cloudstream3.SearchResponse
@@ -80,8 +80,6 @@ class LibraryFragment : BaseFragment<FragmentLibraryBinding>(
     BaseFragment.BindingCreator.Bind(FragmentLibraryBinding::bind)
 ) {
     companion object {
-
-        val listLibraryItems = mutableListOf<SyncAPI.LibraryItem>()
         fun newInstance() = LibraryFragment()
 
         /**
@@ -104,17 +102,22 @@ class LibraryFragment : BaseFragment<FragmentLibraryBinding>(
         super.onSaveInstanceState(outState)
     }
 
-    private fun updateRandom(binding: FragmentLibraryBinding) {
+    private fun updateRandomVisibility(binding: FragmentLibraryBinding) {
+        if (!toggleRandomButton) {
+            binding.libraryRandom.isGone = true
+            binding.libraryRandomButtonTv.isGone = true
+            return
+        }
         val position = libraryViewModel.currentPage.value ?: 0
         val pages = (libraryViewModel.pages.value as? Resource.Success)?.value ?: return
-        if (toggleRandomButton) {
-            listLibraryItems.clear()
-            listLibraryItems.addAll(pages[position].items)
-            binding.libraryRandom.isVisible = listLibraryItems.isNotEmpty()
-        } else binding.libraryRandom.isGone = true
+        val hasItems = pages[position].items.isNotEmpty()
+        val isPhone = isLayout(PHONE)
+
+        binding.libraryRandom.isVisible = isPhone && hasItems
+        binding.libraryRandomButtonTv.isVisible = !isPhone && hasItems
     }
 
-    override fun fixPadding(view: View) {
+    override fun fixLayout(view: View) {
         fixSystemBarsPadding(
             view,
             padBottom = isLandscape(),
@@ -194,17 +197,9 @@ class LibraryFragment : BaseFragment<FragmentLibraryBinding>(
                 settingsManager.getBoolean(
                     getString(R.string.random_button_key),
                     false
-                ) && isLayout(PHONE)
+                )
             binding.libraryRandom.visibility = View.GONE
-        }
-
-        binding.libraryRandom.setOnClickListener {
-            if (listLibraryItems.isNotEmpty()) {
-                val listLibraryItem = listLibraryItems.random()
-                libraryViewModel.currentSyncApi?.syncIdName?.let {
-                    loadLibraryItem(it, listLibraryItem.syncId, listLibraryItem)
-                }
-            }
+            binding.libraryRandomButtonTv.visibility = View.GONE
         }
 
         /**
@@ -215,14 +210,13 @@ class LibraryFragment : BaseFragment<FragmentLibraryBinding>(
             syncId: SyncIdName,
             apiName: String? = null,
         ) {
-            val availableProviders = synchronized(allProviders) {
-                allProviders.filter {
-                    it.supportedSyncNames.contains(syncId)
-                }.map { it.name } +
-                        // Add the api if it exists
-                        (APIHolder.getApiFromNameNull(apiName)?.let { listOf(it.name) }
-                            ?: emptyList())
-            }
+            val availableProviders = allProviders.filter {
+                it.supportedSyncNames.contains(syncId)
+            }.map { it.name } +
+                // Add the api if it exists
+                (APIHolder.getApiFromNameNull(apiName)?.let { listOf(it.name) }
+                    ?: emptyList())
+
             val baseOptions = listOf(
                 LibraryOpenerType.Default,
                 LibraryOpenerType.None,
@@ -329,7 +323,7 @@ class LibraryFragment : BaseFragment<FragmentLibraryBinding>(
 
         val startLoading = Runnable {
             binding.apply {
-                gridview.numColumns = context?.getSpanCount() ?: 3
+                gridview.numColumns = root.context.getSpanCount()
                 gridview.adapter =
                     context?.let { LoadingPosterAdapter(it, 6 * 3) }
                 libraryLoadingOverlay.isVisible = true
@@ -387,7 +381,19 @@ class LibraryFragment : BaseFragment<FragmentLibraryBinding>(
                             binding.searchBar.setExpanded(true)
                         }
 
-                        updateRandom(binding)
+                        // Set up random button click listener
+                        if (toggleRandomButton) {
+                            val randomClickListener = View.OnClickListener {
+                                val position = libraryViewModel.currentPage.value ?: 0
+                                val syncIdName = libraryViewModel.currentSyncApi?.syncIdName ?: return@OnClickListener
+                                pages[position].items.randomOrNull()?.let { item ->
+                                    loadLibraryItem(syncIdName, item.syncId, item)
+                                }
+                            }
+                            libraryRandom.setOnClickListener(randomClickListener)
+                            libraryRandomButtonTv.setOnClickListener(randomClickListener)
+                        }
+                        updateRandomVisibility(binding)
 
                         // Only stop loading after 300ms to hide the fade effect the viewpager produces when updating
                         // Without this there would be a flashing effect:
@@ -466,11 +472,11 @@ class LibraryFragment : BaseFragment<FragmentLibraryBinding>(
         }
 
         observe(libraryViewModel.currentPage) { position ->
-            updateRandom(binding)
+            updateRandomVisibility(binding)
             val all = binding.viewpager.allViews.toList()
                 .filterIsInstance<AutofitRecyclerView>()
 
-            all?.forEach { view ->
+            all.forEach { view ->
                 view.isVisible = view.tag == position
                 view.isFocusable = view.tag == position
 
@@ -538,10 +544,10 @@ class LibraryFragment : BaseFragment<FragmentLibraryBinding>(
 
     }
 
-    @SuppressLint("NotifyDataSetChanged")
     override fun onConfigurationChanged(newConfig: Configuration) {
-        binding?.viewpager?.adapter?.notifyDataSetChanged()
         super.onConfigurationChanged(newConfig)
+        val adapter = binding?.viewpager?.adapter ?: return
+        adapter.notifyItemRangeChanged(0, adapter.itemCount)
     }
 
     private val sortChangeClickListener = View.OnClickListener { view ->

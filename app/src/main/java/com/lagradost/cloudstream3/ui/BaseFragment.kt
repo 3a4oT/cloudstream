@@ -17,7 +17,6 @@ import com.lagradost.cloudstream3.R
 import com.lagradost.cloudstream3.mvvm.logError
 import com.lagradost.cloudstream3.ui.settings.SettingsFragment.Companion.setSystemBarsPadding
 import com.lagradost.cloudstream3.utils.txt
-import com.lagradost.cloudstream3.utils.UIHelper.fixSystemBarsPadding
 
 /**
  * A base Fragment class that simplifies ViewBinding usage and handles view inflation safely.
@@ -75,7 +74,7 @@ private interface BaseFragmentHelper<T : ViewBinding> {
      * Subclasses should use [onBindingCreated] instead of overriding this method directly.
      */
     fun onViewReady(view: View, savedInstanceState: Bundle?) {
-        fixPadding(view)
+        fixLayout(view)
         binding?.let { onBindingCreated(it, savedInstanceState) }
     }
 
@@ -110,22 +109,49 @@ private interface BaseFragmentHelper<T : ViewBinding> {
     fun pickLayout(): Int? = null
 
     /**
-     * Apply padding adjustments for system bars to the root view.
+     * Ensures the layout of the root view is correctly adjusted for the current configuration.
      *
-     * `fixPadding` should be idempotent in respect to the configuration, as the function may be
-     * called many times on the same view in case of configuration change like device orientation.
+     * This may include applying padding for system bars, adjusting insets, or performing other
+     * layout updates. `fixLayout` should remain idempotent, as it can be called multiple
+     * times on the same view, such as during configuration changes (e.g. device rotation) or when
+     * the view is recreated.
      *
      * @param view The root view to adjust.
      */
-    fun fixPadding(view: View) {
-        fixSystemBarsPadding(view)
-    }
+    fun fixLayout(view: View)
 }
 
 abstract class BaseFragment<T : ViewBinding>(
     override val bindingCreator: BindingCreator<T>
 ) : Fragment(), BaseFragmentHelper<T> {
     override var _binding: T? = null
+
+    /** Safer activity?.onBackPressedDispatcher?.onBackPressed() with fallback behavior instead of app crash */
+    fun dispatchBackPressed() {
+        try {
+            activity?.onBackPressedDispatcher?.onBackPressed()
+        } catch (_: IllegalStateException) {
+            // FragmentManager is already executing transactions, so try again
+            delayedDispatchBackPressed(5)
+        } catch (t: Throwable) {
+            logError(t)
+        }
+    }
+
+    /** Recursive back press when available */
+    private fun delayedDispatchBackPressed(remaining: Int) {
+        if (remaining <= 0) return
+        binding?.root?.postDelayed({
+            try {
+                activity?.onBackPressedDispatcher?.onBackPressed()
+            } catch (_: IllegalStateException) {
+                // FragmentManager is already executing transactions, so try again
+                delayedDispatchBackPressed(remaining - 1)
+            } catch (t: Throwable) {
+                logError(t)
+            }
+        }, 200)
+    }
 
     override fun onCreateView(
         inflater: LayoutInflater,
@@ -145,7 +171,7 @@ abstract class BaseFragment<T : ViewBinding>(
      */
     override fun onConfigurationChanged(newConfig: Configuration) {
         super.onConfigurationChanged(newConfig)
-        view?.let { fixPadding(it) }
+        view?.let { fixLayout(it) }
     }
 
     /** Cleans up the binding reference when the view is destroyed to avoid memory leaks. */
@@ -200,7 +226,7 @@ abstract class BaseDialogFragment<T : ViewBinding>(
     /** @see [BaseFragment.onConfigurationChanged] for documentation. */
     override fun onConfigurationChanged(newConfig: Configuration) {
         super.onConfigurationChanged(newConfig)
-        view?.let { fixPadding(it) }
+        view?.let { fixLayout(it) }
     }
 
     /** Cleans up the binding reference when the view is destroyed to avoid memory leaks. */
@@ -229,7 +255,7 @@ abstract class BaseBottomSheetDialogFragment<T : ViewBinding>(
     /** @see [BaseFragment.onConfigurationChanged] for documentation. */
     override fun onConfigurationChanged(newConfig: Configuration) {
         super.onConfigurationChanged(newConfig)
-        view?.let { fixPadding(it) }
+        view?.let { fixLayout(it) }
     }
 
     /** Cleans up the binding reference when the view is destroyed to avoid memory leaks. */
@@ -239,7 +265,7 @@ abstract class BaseBottomSheetDialogFragment<T : ViewBinding>(
     }
 }
 
-abstract class BasePreferenceFragmentCompat(): PreferenceFragmentCompat() {
+abstract class BasePreferenceFragmentCompat() : PreferenceFragmentCompat() {
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         super.onViewCreated(view, savedInstanceState)
         setSystemBarsPadding()

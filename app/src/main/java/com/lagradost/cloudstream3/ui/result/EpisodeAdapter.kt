@@ -1,6 +1,5 @@
 package com.lagradost.cloudstream3.ui.result
 
-import android.annotation.SuppressLint
 import android.content.Context
 import android.view.LayoutInflater
 import android.view.ViewGroup
@@ -8,8 +7,6 @@ import androidx.core.view.isGone
 import androidx.core.view.isVisible
 import androidx.core.view.setPadding
 import androidx.preference.PreferenceManager
-import androidx.recyclerview.widget.DiffUtil
-import androidx.recyclerview.widget.RecyclerView
 import coil3.dispose
 import com.lagradost.cloudstream3.APIHolder.unixTimeMS
 import com.lagradost.cloudstream3.CommonActivity
@@ -24,6 +21,7 @@ import com.lagradost.cloudstream3.ui.ViewHolderState
 import com.lagradost.cloudstream3.ui.download.DOWNLOAD_ACTION_DOWNLOAD
 import com.lagradost.cloudstream3.ui.download.DOWNLOAD_ACTION_LONG_CLICK
 import com.lagradost.cloudstream3.ui.download.DownloadClickEvent
+import com.lagradost.cloudstream3.ui.newSharedPool
 import com.lagradost.cloudstream3.ui.settings.Globals.EMULATOR
 import com.lagradost.cloudstream3.ui.settings.Globals.PHONE
 import com.lagradost.cloudstream3.ui.settings.Globals.TV
@@ -32,7 +30,8 @@ import com.lagradost.cloudstream3.utils.AppContextUtils.html
 import com.lagradost.cloudstream3.utils.Coroutines.main
 import com.lagradost.cloudstream3.utils.ImageLoader.loadImage
 import com.lagradost.cloudstream3.utils.UIHelper.toPx
-import com.lagradost.cloudstream3.utils.VideoDownloadHelper
+import com.lagradost.cloudstream3.utils.downloader.DownloadObjects
+import com.lagradost.cloudstream3.utils.downloader.VideoDownloadManager
 import com.lagradost.cloudstream3.utils.setText
 import com.lagradost.cloudstream3.utils.txt
 import java.text.DateFormat
@@ -92,11 +91,10 @@ class EpisodeAdapter(
         }
 
         val sharedPool =
-            RecyclerView.RecycledViewPool()
-                .apply {
-                    this.setMaxRecycledViews(HAS_POSTER or CONTENT, 10)
-                    this.setMaxRecycledViews(HAS_NO_POSTER or CONTENT, 10)
-                }
+            newSharedPool {
+                setMaxRecycledViews(HAS_POSTER or CONTENT, 10)
+                setMaxRecycledViews(HAS_NO_POSTER or CONTENT, 10)
+            }
     }
 
     override fun onClearView(holder: ViewHolderState<Any>) {
@@ -160,7 +158,7 @@ class EpisodeAdapter(
 
                     downloadButton.isVisible = hasDownloadSupport
                     downloadButton.setDefaultClickListener(
-                        VideoDownloadHelper.DownloadEpisodeCached(
+                        DownloadObjects.DownloadEpisodeCached(
                             name = item.name,
                             poster = item.poster,
                             episode = item.episode,
@@ -198,6 +196,11 @@ class EpisodeAdapter(
                             }
                         }
                     }
+
+                    val status = VideoDownloadManager.downloadStatus[item.id]
+                    downloadButton.resetView()
+                    downloadButton.setPersistentId(item.id)
+                    downloadButton.setStatus(status)
 
                     val name =
                         if (item.name == null) "${episodeText.context.getString(R.string.episode)} ${item.episode}" else "${item.episode}. ${item.name}"
@@ -376,7 +379,7 @@ class EpisodeAdapter(
                 binding.apply {
                     downloadButton.isVisible = hasDownloadSupport
                     downloadButton.setDefaultClickListener(
-                        VideoDownloadHelper.DownloadEpisodeCached(
+                        DownloadObjects.DownloadEpisodeCached(
                             name = item.name,
                             poster = item.poster,
                             episode = item.episode,
@@ -415,6 +418,11 @@ class EpisodeAdapter(
                         }
                     }
 
+                    val status = VideoDownloadManager.downloadStatus[item.id]
+                    downloadButton.resetView()
+                    downloadButton.setPersistentId(item.id)
+                    downloadButton.setStatus(status)
+
                     val name =
                         if (item.name == null) "${episodeText.context.getString(R.string.episode)} ${item.episode}" else "${item.episode}. ${item.name}"
                     episodeFiller.isVisible = item.isFiller == true
@@ -423,16 +431,24 @@ class EpisodeAdapter(
                     episodeText.isSelected = true // is needed for text repeating
 
                     if (item.videoWatchState == VideoWatchState.Watched) {
-                        // This cannot be done in getDisplayPosition() as when you have not watched something
-                        // the duration and position is 0
-                        episodeProgress.max = 1
-                        episodeProgress.progress = 1
-                        episodeProgress.isVisible = true
+                        episodePlayIcon.setImageResource(R.drawable.ic_baseline_check_24)
+                        episodeProgress.isVisible = false
                     } else {
                         val displayPos = item.getDisplayPosition()
-                        episodeProgress.max = (item.duration / 1000).toInt()
-                        episodeProgress.progress = (displayPos / 1000).toInt()
-                        episodeProgress.isVisible = displayPos > 0L
+                        val durationSec = (item.duration / 1000).toInt()
+                        val progressSec = (displayPos / 1000).toInt()
+
+                        if (displayPos >= item.duration && displayPos > 0) {
+                            episodePlayIcon.setImageResource(R.drawable.ic_baseline_check_24)
+                            episodeProgress.isVisible = false
+                        } else {
+                            episodePlayIcon.setImageResource(R.drawable.play_button_transparent)
+                            episodeProgress.apply {
+                                max = durationSec
+                                progress = progressSec
+                                isVisible = displayPos > 0L
+                            }
+                        }
                     }
 
                     itemView.setOnClickListener {

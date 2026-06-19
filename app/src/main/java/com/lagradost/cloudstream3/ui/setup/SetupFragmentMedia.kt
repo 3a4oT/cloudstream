@@ -1,7 +1,9 @@
 package com.lagradost.cloudstream3.ui.setup
 
+import android.view.View
 import android.widget.AbsListView
 import android.widget.ArrayAdapter
+import androidx.core.content.edit
 import androidx.core.util.forEach
 import androidx.navigation.fragment.findNavController
 import androidx.preference.PreferenceManager
@@ -11,10 +13,16 @@ import com.lagradost.cloudstream3.databinding.FragmentSetupMediaBinding
 import com.lagradost.cloudstream3.mvvm.safe
 import com.lagradost.cloudstream3.ui.BaseFragment
 import com.lagradost.cloudstream3.utils.DataStoreHelper
+import com.lagradost.cloudstream3.utils.UIHelper.fixSystemBarsPadding
 
 class SetupFragmentMedia : BaseFragment<FragmentSetupMediaBinding>(
     BaseFragment.BindingCreator.Inflate(FragmentSetupMediaBinding::inflate)
 ) {
+
+    override fun fixLayout(view: View) {
+        fixSystemBarsPadding(view)
+    }
+
     override fun onBindingCreated(binding: FragmentSetupMediaBinding) {
         safe {
             val ctx = context ?: return@safe
@@ -46,9 +54,9 @@ class SetupFragmentMedia : BaseFragment<FragmentSetupMediaBinding>(
                             val itemVal = TvType.valueOf(item)
                             itemVal.ordinal.toString()
                         }.toSet()
-                        settingsManager.edit()
-                            .putStringSet(getString(R.string.prefer_media_type_key), prefValues)
-                            .apply()
+                        settingsManager.edit {
+                            putStringSet(getString(R.string.prefer_media_type_key), prefValues)
+                        }
 
                         // Regenerate set homepage
                         DataStoreHelper.currentHomePage = null

@@ -20,7 +20,7 @@ import androidx.viewpager2.widget.ViewPager2
 import com.google.android.material.chip.Chip
 import com.google.android.material.chip.ChipGroup
 import com.google.android.material.navigation.NavigationBarItemView
-import com.lagradost.cloudstream3.AcraApplication.Companion.getActivity
+import com.lagradost.cloudstream3.CloudStreamApp.Companion.getActivity
 import com.lagradost.cloudstream3.CommonActivity.activity
 import com.lagradost.cloudstream3.HomePageList
 import com.lagradost.cloudstream3.LoadResponse
@@ -39,6 +39,7 @@ import com.lagradost.cloudstream3.ui.account.AccountHelper.showAccountEditDialog
 import com.lagradost.cloudstream3.ui.account.AccountHelper.showAccountSelectLinear
 import com.lagradost.cloudstream3.ui.account.AccountViewModel
 import com.lagradost.cloudstream3.ui.result.FOCUS_SELF
+import com.lagradost.cloudstream3.ui.result.ResultFragment.bindLogo
 import com.lagradost.cloudstream3.ui.result.ResultViewModel2
 import com.lagradost.cloudstream3.ui.result.START_ACTION_RESUME_LATEST
 import com.lagradost.cloudstream3.ui.result.getId
@@ -58,9 +59,10 @@ import com.lagradost.cloudstream3.utils.SingleSelectionHelper.showOptionSelectSt
 import com.lagradost.cloudstream3.utils.UIHelper.fixPaddingStatusbarMargin
 import com.lagradost.cloudstream3.utils.UIHelper.fixPaddingStatusbarView
 import com.lagradost.cloudstream3.utils.UIHelper.populateChips
+import androidx.core.graphics.toColorInt
+import com.lagradost.cloudstream3.ui.setRecycledViewPool
 
 class HomeParentItemAdapterPreview(
-    val fragment: LifecycleOwner,
     private val viewModel: HomeViewModel,
     private val accountViewModel: AccountViewModel
 ) : ParentItemAdapter(
@@ -102,7 +104,7 @@ class HomeParentItemAdapterPreview(
             )
         }
 
-        return HeaderViewHolder(binding, viewModel, accountViewModel, fragment)
+        return HeaderViewHolder(binding, viewModel, accountViewModel)
     }
 
     override fun onBindHeader(holder: ViewHolderState<Bundle>) {
@@ -129,7 +131,6 @@ class HomeParentItemAdapterPreview(
         val binding: ViewBinding,
         val viewModel: HomeViewModel,
         accountViewModel: AccountViewModel,
-        fragment: LifecycleOwner,
     ) :
         ViewHolderState<Bundle>(binding) {
 
@@ -338,16 +339,63 @@ class HomeParentItemAdapterPreview(
 
         fun onSelect(item: LoadResponse, position: Int) {
             (binding as? FragmentHomeHeadTvBinding)?.apply {
-                homePreviewDescription.isGone =
-                    item.plot.isNullOrBlank()
-                homePreviewDescription.text =
-                    item.plot?.html() ?: ""
+                homePreviewDescription.isGone = item.plot.isNullOrBlank()
+                homePreviewDescription.text = item.plot?.html() ?: ""
+
+                val scoreText = item.score?.toStringNull(0.1, 10, 1, false)
+
+                scoreText?.let { score ->
+                    homePreviewScore.text =
+                        homePreviewScore.context.getString(R.string.extension_rating, score)
+
+                    // while it should never fail, we do this just in case
+                    val rating = score.toDoubleOrNull() ?: item.score?.toDouble() ?: 0.0
+
+                    val color = when {
+                        rating < 5.0 -> "#eb2f2f".toColorInt() // Red
+                        rating < 8.0 -> "#eda009".toColorInt() // Yellow
+                        else -> "#3bb33b".toColorInt() // Green
+                    }
+                    homePreviewScore.backgroundTintList =
+                        android.content.res.ColorStateList.valueOf(color)
+                }
+                homePreviewScore.isGone = scoreText == null
+
+                item.year?.let { year ->
+                    homePreviewYear.text = year.toString()
+                }
+                homePreviewYear.isGone = item.year == null
+
+                val duration = item.duration
+                duration?.let { min ->
+                    homePreviewDuration.text =
+                        homePreviewDuration.context.getString(R.string.duration_format, min)
+                }
+                homePreviewDuration.isGone = duration == null || duration <= 0
+
+                val castText = item.actors?.take(3)?.joinToString(", ") { it.actor.name }
+                if (!castText.isNullOrBlank()) {
+                    homePreviewCast.text =
+                        homePreviewCast.context.getString(R.string.cast_format, castText)
+                    homePreviewCast.isVisible = true
+                } else {
+                    homePreviewCast.isVisible = false
+                }
 
                 homePreviewText.text = item.name.html()
                 populateChips(
                     homePreviewTags,
                     item.tags?.take(6) ?: emptyList(),
-                    R.style.ChipFilledSemiTransparent
+                    R.style.ChipFilledSemiTransparent,
+                    null
+                )
+
+
+                bindLogo(
+                    url = item.logoUrl,
+                    headers = item.posterHeaders,
+                    titleView = homePreviewText,
+                    logoView = homeBackgroundPosterWatermarkBadgeHolder
                 )
 
                 homePreviewTags.isGone =
@@ -494,7 +542,7 @@ class HomeParentItemAdapterPreview(
             headProfilePicCard?.isGone = isLayout(TV or EMULATOR)
             alternateHeadProfilePicCard?.isGone = isLayout(TV or EMULATOR)
 
-            fragment.observe(viewModel.currentAccount) { currentAccount ->
+            (headProfilePic ?: alternateHeadProfilePic)?.observe(viewModel.currentAccount) { currentAccount ->
                 headProfilePic?.loadImage(currentAccount?.image)
                 alternateHeadProfilePic?.loadImage(currentAccount?.image)
             }
@@ -637,6 +685,12 @@ class HomeParentItemAdapterPreview(
                     (binding as? FragmentHomeHeadTvBinding)?.apply {
                         homePreviewInfoBtt.isVisible = true
                     }
+                    // Explicitly bind the current item to ensure instant loading
+                    val currentPos = previewViewpager.currentItem
+                    val item = preview.value.second.getOrNull(currentPos)
+                    if (item != null) {
+                        onSelect(item, currentPos)
+                    }
                 }
 
                 else -> {
@@ -719,7 +773,7 @@ class HomeParentItemAdapterPreview(
         fun onViewAttachedToWindow() {
             previewViewpager.registerOnPageChangeCallback(previewCallback)
 
-            binding.root.findViewTreeLifecycleOwner()?.apply {
+            previewViewpager.apply {
                 observe(viewModel.preview) {
                     updatePreview(it)
                 }
@@ -744,7 +798,7 @@ class HomeParentItemAdapterPreview(
                     }
                     toggleListHolder?.isGone = visible.isEmpty()
                 }
-            } ?: debugException { "Expected findViewTreeLifecycleOwner" }
+            }
         }
     }
 }

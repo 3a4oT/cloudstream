@@ -43,6 +43,7 @@ import androidx.appcompat.widget.PopupMenu
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import androidx.core.content.getSystemService
+import androidx.core.content.withStyledAttributes
 import androidx.core.graphics.alpha
 import androidx.core.graphics.blue
 import androidx.core.graphics.green
@@ -67,8 +68,7 @@ import com.google.android.material.appbar.AppBarLayout
 import com.google.android.material.chip.Chip
 import com.google.android.material.chip.ChipDrawable
 import com.google.android.material.chip.ChipGroup
-import com.lagradost.cloudstream3.AcraApplication.Companion.context
-import com.lagradost.cloudstream3.CommonActivity
+import com.lagradost.cloudstream3.CloudStreamApp.Companion.context
 import com.lagradost.cloudstream3.CommonActivity.activity
 import com.lagradost.cloudstream3.CommonActivity.showToast
 import com.lagradost.cloudstream3.R
@@ -79,7 +79,6 @@ import com.lagradost.cloudstream3.ui.settings.Globals.TV
 import com.lagradost.cloudstream3.ui.settings.Globals.isLayout
 import com.lagradost.cloudstream3.utils.AppContextUtils.isRtl
 import com.lagradost.cloudstream3.utils.Coroutines.main
-import com.lagradost.cloudstream3.utils.UIHelper.navigate
 import kotlinx.coroutines.delay
 import kotlin.math.roundToInt
 import com.lagradost.cloudstream3.utils.BackPressedCallbackHelper.disableBackPressedCallback
@@ -105,7 +104,8 @@ object UIHelper {
     fun populateChips(
         view: ChipGroup?,
         tags: List<String>,
-        @StyleRes style: Int = R.style.ChipFilled
+        @StyleRes style: Int = R.style.ChipFilled,
+        @AttrRes textColor: Int? = R.attr.white,
     ) {
         if (view == null) return
         view.removeAllViews()
@@ -126,7 +126,9 @@ object UIHelper {
             chip.isCheckable = false
             chip.isFocusable = false
             chip.isClickable = false
-            chip.setTextColor(context.colorFromAttribute(R.attr.white))
+            textColor?.let {
+                chip.setTextColor(context.colorFromAttribute(it))
+            }
             view.addView(chip)
         }
     }
@@ -202,17 +204,15 @@ object UIHelper {
         listView.requestLayout()
     }
 
-    fun Context?.getSpanCount(): Int? {
-        val compactView = false
-        val spanCountLandscape = if (compactView) 2 else 6
-        val spanCountPortrait = if (compactView) 1 else 3
-        val orientation = this?.resources?.configuration?.orientation ?: return null
+    fun Context.getSpanCount(isHorizontal:Boolean=false): Int {
+//        val compactView = false
+        val spanCountLandscape = if (isHorizontal) 3 else 6
+        val spanCountPortrait = if (isHorizontal) 2 else 3
+        val orientation = resources.configuration.orientation
 
         return if (orientation == Configuration.ORIENTATION_LANDSCAPE) {
             spanCountLandscape
-        } else {
-            spanCountPortrait
-        }
+        } else spanCountPortrait
     }
 
     fun Fragment.hideKeyboard() {
@@ -259,10 +259,12 @@ object UIHelper {
     }
 
     // Open activities from an activity outside the nav graph
-    fun Context.openActivity(activity: Class<*>, args: Bundle? = null) {
+    fun Context.openActivity(activity: Class<*>, args: Bundle? = null, baseIntent: Intent? = null) {
         val tag = "NavComponent"
         try {
-            val intent = Intent(this, activity)
+            val intent = baseIntent ?: Intent()
+            intent.setClass(this, activity)
+
             if (args != null) {
                 intent.putExtras(args)
             }
@@ -274,12 +276,12 @@ object UIHelper {
     }
 
     /** If you want to call this from a BackPressedCallback, pass the name of the callback to temporarily disable it */
-    fun FragmentActivity.popCurrentPage(fromBackPressedCallback : String? = null) {
+    fun FragmentActivity.popCurrentPage(fromBackPressedCallback: String? = null) {
         // Use the main looper handler to post actions on the main thread
         main {
             // Post the back press action to the main thread handler to ensure it executes
             // after any currently pending UI updates or fragment transactions.
-            if(fromBackPressedCallback != null) {
+            if (fromBackPressedCallback != null) {
                 disableBackPressedCallback(fromBackPressedCallback)
             }
             if (!supportFragmentManager.isStateSaved) {
@@ -297,7 +299,7 @@ object UIHelper {
                     onBackPressedDispatcher.onBackPressed()
                 }
             }
-            if(fromBackPressedCallback != null) {
+            if (fromBackPressedCallback != null) {
                 enableBackPressedCallback(fromBackPressedCallback)
             }
         }
@@ -305,16 +307,23 @@ object UIHelper {
 
     @ColorInt
     fun Context.getResourceColor(@AttrRes resource: Int, alphaFactor: Float = 1f): Int {
-        val typedArray = obtainStyledAttributes(intArrayOf(resource))
-        val color = typedArray.getColor(0, 0)
-        typedArray.recycle()
+        val color = colorFromAttribute(resource)
+        return if (alphaFactor < 1f) adjustAlpha(color, alphaFactor) else color
+    }
 
-        if (alphaFactor < 1f) {
-            val alpha = (color.alpha * alphaFactor).roundToInt()
-            return Color.argb(alpha, color.red, color.green, color.blue)
+    @ColorInt
+    fun Context.colorFromAttribute(@AttrRes attribute: Int): Int {
+        var color = 0
+        withStyledAttributes(attrs = intArrayOf(attribute)) {
+            color = getColor(0, 0)
         }
-
         return color
+    }
+
+    @ColorInt
+    fun adjustAlpha(@ColorInt color: Int, factor: Float): Int {
+        val alpha = (color.alpha * factor).roundToInt()
+        return Color.argb(alpha, color.red, color.green, color.blue)
     }
 
     var createPaletteAsyncCache: HashMap<String, Palette> = hashMapOf()
@@ -331,26 +340,12 @@ object UIHelper {
         }
     }
 
-    fun adjustAlpha(@ColorInt color: Int, factor: Float): Int {
-        val alpha = (Color.alpha(color) * factor).roundToInt()
-        val red = Color.red(color)
-        val green = Color.green(color)
-        val blue = Color.blue(color)
-        return Color.argb(alpha, red, green, blue)
-    }
-
-    fun Context.colorFromAttribute(attribute: Int): Int {
-        val attributes = obtainStyledAttributes(intArrayOf(attribute))
-        val color = attributes.getColor(0, 0)
-        attributes.recycle()
-        return color
-    }
-
     fun Activity.hideSystemUI() {
         // Enables regular immersive mode.
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
             val controller = WindowCompat.getInsetsController(window, window.decorView)
-            controller.systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+            controller.systemBarsBehavior =
+                WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
             controller.hide(WindowInsetsCompat.Type.systemBars())
             return
         }
@@ -359,16 +354,16 @@ object UIHelper {
         // Or for "sticky immersive," replace it with SYSTEM_UI_FLAG_IMMERSIVE_STICKY
         @Suppress("DEPRECATION")
         window.decorView.systemUiVisibility = (
-            View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
-                // Set the content to appear under the system bars so that the
-                // content doesn't resize when the system bars hide and show.
-                or View.SYSTEM_UI_FLAG_LAYOUT_STABLE
-                or View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
-                or View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
-                // Hide the nav bar and status bar
-                or View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
-                or View.SYSTEM_UI_FLAG_FULLSCREEN
-        )
+                View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
+                        // Set the content to appear under the system bars so that the
+                        // content doesn't resize when the system bars hide and show.
+                        or View.SYSTEM_UI_FLAG_LAYOUT_STABLE
+                        or View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
+                        or View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
+                        // Hide the nav bar and status bar
+                        or View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
+                        or View.SYSTEM_UI_FLAG_FULLSCREEN
+                )
     }
 
     fun Activity.enableEdgeToEdgeCompat() {
@@ -430,7 +425,8 @@ object UIHelper {
         padBottom: Boolean = true,
         padLeft: Boolean = true,
         padRight: Boolean = true,
-        overlayCutout: Boolean = true
+        overlayCutout: Boolean = true,
+        fixIme: Boolean = false
     ) {
         // edge-to-edge is very buggy on earlier versions so we just
         // handle the status bar here instead.
@@ -446,10 +442,11 @@ object UIHelper {
             val leftCheck = if (view.isRtl()) padRight else padLeft
             val rightCheck = if (view.isRtl()) padLeft else padRight
 
-            val insets = windowInsets.getInsets(
-                WindowInsetsCompat.Type.systemBars()
-                    or WindowInsetsCompat.Type.displayCutout()
-            )
+            val insetTypes = WindowInsetsCompat.Type.systemBars() or
+                WindowInsetsCompat.Type.displayCutout() or
+                if (fixIme) WindowInsetsCompat.Type.ime() else 0
+
+            val insets = windowInsets.getInsets(insetTypes)
 
             view.updatePadding(
                 left = if (leftCheck) insets.left else view.paddingLeft,
@@ -559,31 +556,6 @@ object UIHelper {
         changeStatusBarState(isLayout(EMULATOR))
     }
 
-    fun Context.shouldShowPIPMode(isInPlayer: Boolean): Boolean {
-        return try {
-            val settingsManager = PreferenceManager.getDefaultSharedPreferences(this)
-            settingsManager?.getBoolean(
-                getString(R.string.pip_enabled_key),
-                true
-            ) ?: true && isInPlayer
-        } catch (e: Exception) {
-            logError(e)
-            false
-        }
-    }
-
-    fun Context.hasPIPPermission(): Boolean {
-        val appOps =
-            getSystemService(Context.APP_OPS_SERVICE) as AppOpsManager
-        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            appOps.checkOpNoThrow(
-                AppOpsManager.OPSTR_PICTURE_IN_PICTURE,
-                android.os.Process.myUid(),
-                packageName
-            ) == AppOpsManager.MODE_ALLOWED
-        } else true
-    }
-
     fun hideKeyboard(view: View?) {
         if (view == null) return
 
@@ -683,7 +655,13 @@ private class CutoutOverlayDrawable(
     }
 
     override fun draw(canvas: Canvas) {
-        if (leftCutout > 0) canvas.drawRect(0f, 0f, leftCutout.toFloat(), view.height.toFloat(), paint)
+        if (leftCutout > 0) canvas.drawRect(
+            0f,
+            0f,
+            leftCutout.toFloat(),
+            view.height.toFloat(),
+            paint
+        )
         if (rightCutout > 0) {
             canvas.drawRect(
                 view.width - rightCutout.toFloat(),
@@ -696,6 +674,7 @@ private class CutoutOverlayDrawable(
 
     override fun setAlpha(alpha: Int) {}
     override fun setColorFilter(colorFilter: ColorFilter?) {}
+
     @Suppress("OVERRIDE_DEPRECATION")
     override fun getOpacity() = PixelFormat.OPAQUE
 }

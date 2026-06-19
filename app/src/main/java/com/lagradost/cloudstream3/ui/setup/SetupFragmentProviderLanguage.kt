@@ -1,7 +1,9 @@
 package com.lagradost.cloudstream3.ui.setup
 
+import android.view.View
 import android.widget.AbsListView
 import android.widget.ArrayAdapter
+import androidx.core.content.edit
 import androidx.core.util.forEach
 import androidx.navigation.fragment.findNavController
 import androidx.preference.PreferenceManager
@@ -13,10 +15,16 @@ import com.lagradost.cloudstream3.R
 import com.lagradost.cloudstream3.ui.BaseFragment
 import com.lagradost.cloudstream3.utils.AppContextUtils.getApiProviderLangSettings
 import com.lagradost.cloudstream3.utils.SubtitleHelper.getNameNextToFlagEmoji
+import com.lagradost.cloudstream3.utils.UIHelper.fixSystemBarsPadding
 
 class SetupFragmentProviderLanguage : BaseFragment<FragmentSetupProviderLanguagesBinding>(
     BaseFragment.BindingCreator.Inflate(FragmentSetupProviderLanguagesBinding::inflate)
 ) {
+
+    override fun fixLayout(view: View) {
+        fixSystemBarsPadding(view)
+    }
+
     override fun onBindingCreated(binding: FragmentSetupProviderLanguagesBinding) {
         safe {
             val ctx = context ?: return@safe
@@ -28,10 +36,10 @@ class SetupFragmentProviderLanguage : BaseFragment<FragmentSetupProviderLanguage
 
             val currentLangTags = ctx.getApiProviderLangSettings()
 
-            val languagesTagName = synchronized(APIHolder.apis) {
-                listOf( Pair(AllLanguagesName, getString(R.string.all_languages_preference)) ) +
+            val languagesTagName = APIHolder.apis.withLock {
+                listOf(Pair(AllLanguagesName, getString(R.string.all_languages_preference))) +
                 APIHolder.apis.map { Pair(it.lang, getNameNextToFlagEmoji(it.lang) ?: it.lang) }
-                    .toSet().sortedBy { it.second.substringAfter("\u00a0").lowercase() } // name ignoring flag emoji
+                    .toSet().sortedBy { it.second.substringAfter("\u00a0").lowercase() } // name ignoring flag emoji
             }
 
             val currentIndexList = currentLangTags.map { langTag ->
@@ -51,10 +59,12 @@ class SetupFragmentProviderLanguage : BaseFragment<FragmentSetupProviderLanguage
                     listview1.checkedItemPositions?.forEach { key, value ->
                         if (value) selectedLanguages.add(languagesTagName[key].first)
                     }
-                    settingsManager.edit().putStringSet(
-                        ctx.getString(R.string.provider_lang_key),
-                        selectedLanguages.toSet()
-                    ).apply()
+                    settingsManager.edit {
+                        putStringSet(
+                            ctx.getString(R.string.provider_lang_key),
+                            selectedLanguages.toSet()
+                        )
+                    }
                 }
 
                 nextBtt.setOnClickListener {
